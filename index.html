@@ -1,0 +1,766 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MarkWrite</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/node_modules/bootstrap-icons/font/bootstrap-icons.css" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          sans-serif;
+        color: #111827;
+        background-color: #0b1120;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      .titlebar {
+        height: 28px;
+        flex-shrink: 0;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: linear-gradient(90deg, #0f172a, #1e293b);
+        color: #e5e7eb;
+        -webkit-app-region: drag;
+      }
+      .titlebar-right {
+        display: flex;
+        gap: 8px;
+        font-size: 12px;
+        opacity: 0.8;
+      }
+      .command-bar {
+        height: 28px;
+        flex-shrink: 0;
+        padding: 4px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: radial-gradient(circle at top left, #020617, #020617);
+        border-bottom: 1px solid rgba(30, 64, 175, 0.7);
+        box-shadow: 0 1px 0 0 rgba(30, 64, 175, 0.6);
+      }
+      .command-input {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(75, 85, 99, 0.9);
+        padding: 3px 8px;
+        background: radial-gradient(
+          circle at top left,
+          rgba(56, 189, 248, 0.15),
+          rgba(15, 23, 42, 0.95)
+        );
+        color: #9ca3af;
+        font-size: 12px;
+      }
+      .command-input span.k {
+        border-radius: 6px;
+        border: 1px solid rgba(75, 85, 99, 0.9);
+        padding: 1px 4px;
+        font-size: 11px;
+        color: #9ca3af;
+        background-color: rgba(15, 23, 42, 0.95);
+      }
+      .command-input input {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: #e5e7eb;
+        font-size: 12px;
+        font-family: inherit;
+      }
+      .command-buttons {
+        display: flex;
+        gap: 6px;
+      }
+      .command-btn {
+        padding: 4px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(55, 65, 81, 0.9);
+        background: radial-gradient(
+          circle at top,
+          rgba(15, 118, 110, 0.4),
+          rgba(15, 23, 42, 0.95)
+        );
+        color: #a5f3fc;
+        font-size: 11px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .command-btn span.icon {
+        font-size: 12px;
+      }
+      .command-btn:hover {
+        filter: brightness(1.05);
+      }
+      .app-container {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 240px 1fr 320px;
+        grid-template-rows: 1fr;
+        min-height: 0;
+        height: calc(100vh - 28px - 28px - 20px - 8px);
+        margin-top: 8px;
+        padding: 0 12px 8px;
+        background: radial-gradient(circle at top, #1f2937 0, #020617 40%);
+        color: #e5e7eb;
+      }
+      .pane {
+        border-right: 1px solid rgba(148, 163, 184, 0.2);
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        min-height: 0;
+      }
+      .pane:last-child {
+        border-right: none;
+      }
+      .pane-header {
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: #9ca3af;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+      .pane-header span {
+        font-size: 10px;
+        opacity: 0.7;
+      }
+      .pane-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .md-preview-toggle {
+        padding: 2px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        background: rgba(15, 23, 42, 0.8);
+        color: #94a3b8;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .md-preview-toggle:hover {
+        background: rgba(56, 189, 248, 0.2);
+        color: #e2e8f0;
+      }
+      .md-preview-toggle.is-on {
+        border-color: rgba(56, 189, 248, 0.7);
+        color: #38bdf8;
+      }
+      .pane-body {
+        flex: 1;
+        min-height: 0;
+        border-radius: 12px;
+        background: linear-gradient(
+          145deg,
+          rgba(15, 23, 42, 0.96),
+          rgba(15, 23, 42, 0.85)
+        );
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        box-shadow:
+          0 18px 45px rgba(15, 23, 42, 0.9),
+          0 0 0 1px rgba(15, 23, 42, 0.8);
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .tab-strip {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 6px;
+        padding: 0 2px;
+      }
+      .tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        cursor: default;
+        color: #9ca3af;
+        background-color: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(55, 65, 81, 0.9);
+      }
+      .tab.active {
+        background: radial-gradient(
+          circle at top left,
+          rgba(59, 130, 246, 0.5),
+          rgba(15, 23, 42, 0.98)
+        );
+        border-color: rgba(59, 130, 246, 0.9);
+        color: #e5e7eb;
+      }
+      .tab .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: #22c55e;
+      }
+      .statusbar {
+        height: 20px;
+        flex-shrink: 0;
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 11px;
+        background: linear-gradient(90deg, #020617, #020617);
+        border-top: 1px solid rgba(30, 64, 175, 0.7);
+        color: #9ca3af;
+      }
+      .statusbar-left,
+      .statusbar-right {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .status-pill {
+        border-radius: 999px;
+        border: 1px solid rgba(55, 65, 81, 0.9);
+        padding: 1px 6px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .file-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        font-size: 13px;
+        color: #e5e7eb;
+      }
+      .file-list li {
+        padding: 4px 6px;
+        border-radius: 6px;
+        cursor: default;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .file-list li span.dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: #22c55e;
+      }
+      .file-list li span.name {
+        flex: 1;
+      }
+      .file-list li span.badge {
+        font-size: 10px;
+        padding: 1px 5px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        color: #9ca3af;
+      }
+      /* Markdown 格式工具栏 */
+      .md-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 12px;
+        margin-bottom: 0;
+        border-radius: 10px 10px 0 0;
+        background: #1e1e1e;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-bottom: none;
+      }
+      .md-toolbar-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 28px;
+        padding: 0;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: #94a3b8;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 400;
+        line-height: 1;
+      }
+      .md-toolbar-btn .bi {
+        font-size: 1.15rem;
+      }
+      .md-toolbar-btn:hover {
+        background: rgba(56, 189, 248, 0.2);
+        color: #e2e8f0;
+      }
+      .md-toolbar-btn:active {
+        background: rgba(56, 189, 248, 0.35);
+      }
+      .md-toolbar-sep {
+        width: 1px;
+        height: 18px;
+        background: rgba(148, 163, 184, 0.35);
+        margin: 0 2px;
+      }
+      /* Monaco 编辑区；预览为覆盖层 overlay */
+      .editor-with-preview {
+        position: relative;
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+      }
+      .editor-with-preview.preview-closed .md-preview-wrap,
+      .editor-with-preview[data-preview="closed"] .md-preview-wrap {
+        display: none !important;
+      }
+      .editor-with-preview:not(.preview-closed) .md-preview-wrap,
+      .editor-with-preview[data-preview="open"] .md-preview-wrap {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        border-radius: 10px;
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.3);
+      }
+      .md-editor-column {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        min-width: 0;
+        flex: 1;
+        width: 100%;
+        background: #1e1e1e;
+        border-radius: 10px;
+      }
+      #monaco-container {
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+        border-radius: 0 0 10px 10px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-top: none;
+        overflow: hidden;
+        background: #1e1e1e;
+      }
+      .md-preview-wrap {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        border-radius: 10px;
+        border: 2px solid rgba(56, 189, 248, 0.4);
+        background: rgba(15, 23, 42, 0.98);
+        overflow: hidden;
+        box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.2);
+      }
+      .md-preview-wrap .preview-panel-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 10px;
+        padding: 12px 16px 0;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: rgba(148, 163, 184, 0.85);
+      }
+      .md-preview-wrap .preview-panel-header .bi {
+        font-size: 1rem;
+        color: rgba(56, 189, 248, 0.9);
+      }
+      .preview-back-btn {
+        margin-left: auto;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        background: rgba(15, 23, 42, 0.9);
+        color: #94a3b8;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .preview-back-btn:hover {
+        background: rgba(56, 189, 248, 0.2);
+        color: #e2e8f0;
+      }
+      .preview-back-btn .bi { font-size: 0.95rem; }
+      #md-preview {
+        flex: 1;
+        min-height: 120px;
+        min-width: 0;
+        overflow: auto;
+        padding: 18px 22px;
+        font-size: 14px;
+        line-height: 1.65;
+        color: #e2e8f0;
+      }
+      #md-preview h1, #md-preview h2, #md-preview h3 {
+        color: #f1f5f9;
+        margin-top: 1em;
+        margin-bottom: 0.4em;
+      }
+      #md-preview h1 { font-size: 1.5em; }
+      #md-preview h2 { font-size: 1.25em; }
+      #md-preview h3 { font-size: 1.1em; }
+      #md-preview code {
+        font-family: ui-monospace, monospace;
+        background: rgba(30, 41, 59, 0.9);
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.92em;
+      }
+      #md-preview pre {
+        background: rgba(30, 41, 59, 0.95);
+        padding: 10px 12px;
+        border-radius: 8px;
+        overflow: auto;
+      }
+      #md-preview pre code { padding: 0; background: none; }
+      #md-preview blockquote {
+        border-left: 4px solid rgba(56, 189, 248, 0.6);
+        margin: 0.6em 0;
+        padding-left: 12px;
+        color: #94a3b8;
+      }
+      #md-preview a { color: #38bdf8; text-decoration: none; }
+      #md-preview a:hover { text-decoration: underline; }
+      #md-preview ul, #md-preview ol { padding-left: 1.5em; }
+      #md-preview .code-block { margin: 0.8em 0; border-radius: 8px; overflow: hidden; background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(148, 163, 184, 0.25); }
+      #md-preview .code-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: rgba(15, 23, 42, 0.9); border-bottom: 1px solid rgba(148, 163, 184, 0.2); font-size: 12px; color: #94a3b8; }
+      #md-preview .code-header-left { display: flex; gap: 6px; }
+      #md-preview .code-header .dot { width: 10px; height: 10px; border-radius: 50%; }
+      #md-preview .code-header .dot.red { background: #f87171; }
+      #md-preview .code-header .dot.yellow { background: #fbbf24; }
+      #md-preview .code-header .dot.green { background: #34d399; }
+      #md-preview .copy-btn { padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(148, 163, 184, 0.5); background: transparent; color: #94a3b8; cursor: pointer; font-size: 11px; }
+      #md-preview .copy-btn:hover { background: rgba(56, 189, 248, 0.2); color: #e2e8f0; }
+      #md-preview .code-block pre { margin: 0; padding: 10px 12px; overflow: auto; }
+      #md-preview .code-block pre code { padding: 0; background: none; }
+      #md-preview .md-preview-empty, #md-preview .md-preview-error { color: #94a3b8; font-size: 13px; }
+      #md-preview .md-preview-error { color: #f87171; }
+      .ai-chat-container {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        gap: 8px;
+      }
+      .ai-messages {
+        flex: 1;
+        overflow: auto;
+        font-size: 12px;
+        line-height: 1.5;
+        padding-right: 2px;
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .ai-message {
+        margin-bottom: 8px;
+        padding: 6px 7px;
+        border-radius: 8px;
+        background-color: rgba(15, 23, 42, 0.95);
+        border: 1px solid rgba(55, 65, 81, 0.9);
+        user-select: text;
+        -webkit-user-select: text;
+      }
+      .ai-message.system {
+        border-style: dashed;
+        opacity: 0.8;
+      }
+      .ai-message.user {
+        border-color: rgba(59, 130, 246, 0.7);
+        background: radial-gradient(
+          circle at top right,
+          rgba(59, 130, 246, 0.25),
+          rgba(15, 23, 42, 0.98)
+        );
+      }
+      .ai-message.assistant {
+        border-color: rgba(34, 197, 94, 0.7);
+        background: radial-gradient(
+          circle at top left,
+          rgba(34, 197, 94, 0.2),
+          rgba(15, 23, 42, 0.98)
+        );
+      }
+      .ai-input-area {
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        display: flex;
+        align-items: flex-end;
+        padding: 8px 8px 6px;
+        gap: 8px;
+        background: radial-gradient(
+          circle at bottom,
+          rgba(59, 130, 246, 0.1),
+          rgba(15, 23, 42, 0.95)
+        );
+      }
+      #ai-input {
+        flex: 1;
+        resize: none;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: #e5e7eb;
+        font-size: 12px;
+        font-family: inherit;
+        max-height: 80px;
+      }
+      #ai-send.ai-send-btn {
+        flex-shrink: 0;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 1px solid rgba(59, 130, 246, 0.9);
+        background: radial-gradient(circle at top, #38bdf8, #4f46e5);
+        color: white;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      #ai-send.ai-send-btn .bi {
+        font-size: 1rem;
+      }
+      #ai-send.ai-send-btn:hover {
+        filter: brightness(1.1);
+      }
+      #ai-send.ai-send-btn:active {
+        transform: translateY(1px);
+      }
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 6px;
+      }
+      .pill {
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.7);
+        padding: 2px 6px;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #9ca3af;
+      }
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 999px;
+        background: #22c55e;
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.3);
+      }
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        color: #9ca3af;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="titlebar">
+      <div>MarkWrite</div>
+      <div class="titlebar-right">
+        <span>Markdown · Local-first</span>
+        <span>AI-ready Shell</span>
+      </div>
+    </div>
+    <div class="command-bar">
+      <div class="command-input">
+        <span class="k">⌘K</span>
+        <input
+          id="command-input"
+          placeholder="Ask AI, search files, or run a command…"
+        />
+      </div>
+      <div class="command-buttons">
+        <button class="command-btn" id="btn-open" title="打开文件">
+          <span class="icon">📂</span>
+          <span>打开</span>
+        </button>
+        <button class="command-btn" id="btn-save" title="保存">
+          <span class="icon">💾</span>
+          <span>保存</span>
+        </button>
+        <button class="command-btn" id="btn-saveas" title="另存为">
+          <span class="icon">📄</span>
+          <span>另存为</span>
+        </button>
+        <button class="command-btn">
+          <span class="icon">⚙</span>
+          <span>设置</span>
+        </button>
+      </div>
+    </div>
+    <div class="app-container">
+      <div class="pane">
+        <div class="pane-header">
+          <div>Files</div>
+          <span>Explorer</span>
+        </div>
+        <div class="pane-body">
+          <ul class="file-list">
+            <li>
+              <span class="dot"></span>
+              <span class="name">README.md</span>
+              <span class="badge">Active</span>
+            </li>
+            <li>
+              <span class="dot" style="background:#f97316;"></span>
+              <span class="name">design/ai-flows.md</span>
+              <span class="badge">Plan</span>
+            </li>
+            <li>
+              <span class="dot" style="background:#22c55e;"></span>
+              <span class="name">notes/ideas.md</span>
+              <span class="badge">Ideas</span>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="pane">
+        <div class="pane-header">
+          <div>Editor</div>
+          <span class="pane-header-actions">
+            <span id="editor-filename">未命名</span>
+            <button type="button" class="md-preview-toggle" id="preview-toggle" title="切换预览">预览</button>
+          </span>
+        </div>
+        <div class="pane-body">
+          <div class="editor-with-preview" id="editor-with-preview" data-preview="closed">
+            <div class="md-editor-column">
+              <div class="md-toolbar">
+                <button type="button" class="md-toolbar-btn" id="md-bold" title="Bold"><i class="bi bi-type-bold"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-italic" title="Italic"><i class="bi bi-type-italic"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-strike" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
+                <span class="md-toolbar-sep"></span>
+                <button type="button" class="md-toolbar-btn" id="md-h1" title="Heading 1"><i class="bi bi-type-h1"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-h2" title="Heading 2"><i class="bi bi-type-h2"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-h3" title="Heading 3"><i class="bi bi-type-h3"></i></button>
+                <span class="md-toolbar-sep"></span>
+                <button type="button" class="md-toolbar-btn" id="md-quote" title="Quote"><i class="bi bi-quote"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-ul" title="Unordered List"><i class="bi bi-list-ul"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-ol" title="Ordered List"><i class="bi bi-list-ol"></i></button>
+                <span class="md-toolbar-sep"></span>
+                <button type="button" class="md-toolbar-btn" id="md-link" title="Create Link"><i class="bi bi-link-45deg"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-image" title="Insert Image"><i class="bi bi-image"></i></button>
+                <span class="md-toolbar-sep"></span>
+                <button type="button" class="md-toolbar-btn" id="md-code" title="Inline Code"><i class="bi bi-code-slash"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-fence" title="Code Block"><i class="bi bi-file-code"></i></button>
+                <button type="button" class="md-toolbar-btn" id="md-hr" title="Horizontal Rule"><i class="bi bi-dash-lg"></i></button>
+              </div>
+              <div id="monaco-container"></div>
+            </div>
+            <div class="md-preview-wrap">
+              <div class="preview-panel-header">
+                <i class="bi bi-eye"></i>
+                <span>Preview</span>
+                <button type="button" class="preview-back-btn" id="preview-back-btn" title="Back to editor">
+                  <i class="bi bi-pencil-square"></i>
+                  <span>Edit</span>
+                </button>
+              </div>
+              <div id="md-preview" class="md-preview-body">预览将显示在这里…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pane">
+        <div class="pane-header">
+          <div>Chat</div>
+          <span>AI</span>
+        </div>
+        <div class="pane-body">
+          <div class="ai-chat-container">
+            <div class="pill-row">
+              <div class="pill">Chat</div>
+              <div class="pill">Rename</div>
+              <div class="pill">Restructure</div>
+            </div>
+            <div class="status-row">
+              <div class="status-dot"></div>
+              <div>Disconnected · Configure backend later</div>
+            </div>
+            <div class="ai-messages" id="ai-messages"></div>
+            <div class="ai-input-area">
+              <textarea
+                id="ai-input"
+                rows="2"
+                placeholder="Ask AI, or describe what you want to change…"
+              ></textarea>
+              <button type="button" id="ai-send" class="ai-send-btn" title="Send">
+                <i class="bi bi-arrow-up"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="statusbar">
+      <div class="statusbar-left">
+        <span class="status-pill">Markdown</span>
+        <span>LF</span>
+        <span>UTF-8</span>
+      </div>
+      <div class="statusbar-right">
+        <span>MarkWrite · Shell v0.1</span>
+        <span>AI: not configured</span>
+      </div>
+    </div>
+    <script src="/node_modules/monaco-editor/min/vs/loader.js"></script>
+    <script src="/node_modules/mermaid/dist/mermaid.min.js"></script>
+    <script>
+      window.mermaid = window.mermaid || {};
+      if (window.mermaid.run === undefined) {
+        try {
+          window.mermaid.initialize({ startOnLoad: false });
+        } catch (_) {}
+      }
+    </script>
+    <script>
+      require.config({
+        paths: { vs: '/node_modules/monaco-editor/min/vs' },
+        'vs/nls': { availableLanguages: {} }
+      });
+      window.MonacoEnvironment = {
+        getWorkerUrl: function(workerId, label) {
+          return '/node_modules/monaco-editor/esm/vs/editor/editor.worker.js';
+        }
+      };
+      require(['vs/editor/editor.main'], function() {
+        window.dispatchEvent(new Event('monaco-ready'));
+      });
+    </script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>
+
