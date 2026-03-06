@@ -1,9 +1,14 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const os = require('os');
 
-const PORT = 3131;
+// 让 Linux 程序坞/任务栏用 .desktop 的图标（需与 StartupWMClass 一致）
+app.setName('MarkWrite');
+
+const PORT_BASE = 3131;
+const PORT_LAST = 3140;
 const ROOT = __dirname;
 let mainWindow = null;
 
@@ -51,15 +56,26 @@ function createServer() {
 }
 
 function createWindow(port) {
+  const iconPath = path.join(ROOT, 'assets', 'markwrite-icon.png');
+  let iconImage = null;
+  if (fs.existsSync(iconPath)) {
+    const img = nativeImage.createFromPath(iconPath);
+    if (!img.isEmpty()) iconImage = img;
+  }
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 1040,
+    icon: iconImage || undefined,
     webPreferences: {
       sandbox: false,
       preload: path.join(__dirname, 'preload.js'),
       webSecurity: true,
     },
   });
+
+  // Linux 程序坞/任务栏使用窗口图标；显式 setIcon 确保被 compositor 识别
+  if (iconImage) mainWindow.setIcon(iconImage);
 
   mainWindow.loadURL(`http://127.0.0.1:${port}/index.html`);
 
@@ -78,6 +94,35 @@ function createWindow(port) {
   // mainWindow.webContents.openDevTools();
 }
 
+/** Linux: 注册 .desktop 到 ~/.local/share/applications，程序坞用其 Icon 匹配 WM_CLASS */
+function ensureLinuxDesktopFile() {
+  if (process.platform !== 'linux') return;
+  const iconPath = path.join(ROOT, 'assets', 'markwrite-icon.png');
+  if (!fs.existsSync(iconPath)) return;
+  const desktopDir = path.join(os.homedir(), '.local', 'share', 'applications');
+  try {
+    fs.mkdirSync(desktopDir, { recursive: true });
+  } catch (_) {}
+  const exe = process.execPath;
+  const quote = (s) => (s && s.includes(' ')) ? `"${s}"` : s;
+  const content = [
+    '[Desktop Entry]',
+    'Name=MarkWrite',
+    'Comment=Markdown editor with AI',
+    `Exec=${quote(exe)} ${quote(ROOT)}`,
+    `Icon=${iconPath}`,
+    'Type=Application',
+    'StartupWMClass=MarkWrite',
+    'Categories=Utility;TextEditor;',
+  ].join('\n');
+  const desktopPath = path.join(desktopDir, 'markwrite.desktop');
+  try {
+    if (fs.readFileSync(desktopPath, 'utf8') !== content) {
+      fs.writeFileSync(desktopPath, content, 'utf8');
+    }
+  } catch (_) {}
+}
+
 ipcMain.handle('file:open', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const result = await dialog.showOpenDialog(win, {
@@ -91,6 +136,16 @@ ipcMain.handle('file:open', async () => {
   const filePath = result.filePaths[0];
   const content = fs.readFileSync(filePath, 'utf8');
   return { filePath, content };
+});
+
+ipcMain.handle('file:read', async (_, filePath) => {
+  if (!filePath || typeof filePath !== 'string') return null;
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    return { filePath, content };
+  } catch (_) {
+    return null;
+  }
 });
 
 ipcMain.handle('file:save', async (_, filePath, content) => {
@@ -125,11 +180,20 @@ const { getAiConfig, saveAiConfig } = require('./lib/ai-config.js');
 let aiBackend = null;
 
 app.whenReady().then(() => {
+  ensureLinuxDesktopFile();
   const userDataPath = app.getPath('userData');
   aiBackend = getBackend(userDataPath);
 
-  ipcMain.handle('ai:chat', async (_, text) => {
-    return aiBackend ? aiBackend.chat(text) : { error: 'AI 后端未初始化' };
+  ipcMain.handle('ai:chat', async (_, payload) => {
+    const message = payload && typeof payload.message === 'string' ? payload.message : (payload || '');
+    const context = payload && typeof payload === 'object' && 'context' in payload ? payload.context : undefined;
+    return aiBackend ? aiBackend.chat(message, context) : { error: 'AI 后端未初始化' };
+  });
+  ipcMain.handle('ai:docEdit', async (_, payload) => {
+    const message = payload && typeof payload.message === 'string' ? payload.message : (payload || '');
+    const context = payload && typeof payload === 'object' && 'context' in payload ? payload.context : undefined;
+    const fn = aiBackend && typeof aiBackend.docEdit === 'function' ? aiBackend.docEdit : null;
+    return fn ? fn(message, context) : { error: '智能文档 Agent 未就绪，请使用 OpenCode 后端' };
   });
   ipcMain.handle('ai:health', async () => {
     return aiBackend ? aiBackend.health() : { ok: false, message: 'AI 后端未初始化' };
@@ -140,21 +204,29 @@ app.whenReady().then(() => {
     aiBackend = getBackend(userDataPath);
     return true;
   });
-  const server = createServer();
-  server.listen(PORT, '127.0.0.1', () => {
-    createWindow(PORT);
-  });
-
-  server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`Port ${PORT} in use. Close the other app or change PORT in main.js`);
+  function tryListen(port) {
+    if (port > PORT_LAST) {
+      console.error(`Ports ${PORT_BASE}-${PORT_LAST} in use. Close the other app or change PORT_BASE in main.js`);
+      process.exit(1);
     }
-    throw err;
-  });
+    const server = createServer();
+    server.listen(port, '127.0.0.1', () => {
+      app.port = port;
+      createWindow(port);
+    });
+    server.once('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        tryListen(port + 1);
+      } else {
+        throw err;
+      }
+    });
+  }
+  tryListen(PORT_BASE);
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow(PORT);
+    if (BrowserWindow.getAllWindows().length === 0 && app.port != null) {
+      createWindow(app.port);
     }
   });
 });
