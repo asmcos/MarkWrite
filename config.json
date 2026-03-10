@@ -4,7 +4,7 @@
     "npm": "@ai-sdk/openai-compatible",
     "options": {
       "baseURL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-      "apiKey": "xxxx"
+      "apiKey": ""
     },
     "models": {
       "ark-code-latest": { "name": "ark-code-latest" },
@@ -19,6 +19,30 @@
         "name": "kimi-k2.5",
         "modalities": { "input": ["text", "image"], "output": ["text"] },
         "options": { "thinking": { "type": "enabled" } }
+      }
+    }
+  },
+  "ollama": {
+    "name": "ollama",
+    "npm": "@ai-sdk/openai-compatible",
+    "options": {
+      "baseURL": "http://localhost:11434/v1"
+    },
+    "models": {
+      "deepseek-v3.2:cloud": {
+        "_launch": true,
+        "limit": { "context": 163840, "output": 65536 },
+        "name": "deepseek-v3.2:cloud"
+      },
+      "kimi-k2.5:cloud": {
+        "_launch": true,
+        "limit": { "context": 262144, "output": 262144 },
+        "name": "kimi-k2.5:cloud"
+      },
+      "minimax-m2.5:cloud": {
+        "_launch": true,
+        "limit": { "context": 204800, "output": 128000 },
+        "name": "minimax-m2.5:cloud"
       }
     }
   }

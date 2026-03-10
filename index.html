@@ -110,6 +110,94 @@
       .command-btn:hover {
         filter: brightness(1.05);
       }
+
+      /* Apply-to-editor confirm modal (OpenAgent tool + code-block apply) */
+      .apply-editor-confirm-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10000;
+        padding: 24px;
+      }
+      .apply-editor-confirm-box {
+        width: min(560px, 100%);
+        border-radius: 12px;
+        padding: 16px 16px 14px;
+        background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
+        border: 1px solid rgba(59, 130, 246, 0.35);
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+        color: #e5e7eb;
+      }
+      .apply-editor-confirm-title {
+        font-size: 14px;
+        font-weight: 650;
+        letter-spacing: 0.2px;
+        margin-bottom: 6px;
+      }
+      .apply-editor-confirm-desc {
+        font-size: 12px;
+        color: rgba(229, 231, 235, 0.78);
+        line-height: 1.5;
+        margin-bottom: 12px;
+      }
+      .apply-editor-confirm-preview {
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        max-height: 200px;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+        line-height: 1.45;
+        background: rgba(2, 6, 23, 0.65);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+      }
+      .apply-editor-confirm-preview::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      .apply-editor-confirm-preview::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.35);
+        border-radius: 999px;
+        border: 2px solid rgba(2, 6, 23, 0.65);
+      }
+      .apply-editor-confirm-preview::-webkit-scrollbar-thumb:hover {
+        background: rgba(148, 163, 184, 0.55);
+      }
+      .apply-editor-confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+      .apply-editor-btn {
+        appearance: none;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 10px;
+        padding: 8px 14px;
+        font-size: 12px;
+        cursor: pointer;
+        color: #e5e7eb;
+        background: rgba(15, 23, 42, 0.6);
+      }
+      .apply-editor-btn:hover {
+        filter: brightness(1.06);
+      }
+      .apply-editor-btn:active {
+        transform: translateY(1px);
+      }
+      .apply-editor-btn-primary {
+        border-color: rgba(59, 130, 246, 0.45);
+        background: linear-gradient(180deg, rgba(59, 130, 246, 0.85), rgba(37, 99, 235, 0.75));
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+      }
+      .apply-editor-btn-secondary {
+        background: rgba(30, 41, 59, 0.55);
+      }
       .app-container {
         flex: 1;
         display: grid;
@@ -805,22 +893,7 @@
           <span class="pane-header-actions">
             <label class="ai-model-label">模型</label>
             <select id="ai-model-select" class="ai-model-select" title="AI 模型">
-              <optgroup label="Volcengine Ark · OpenAgent">
-                <option value="volcengine-ark-code-latest">ark-code-latest</option>
-                <option value="volcengine-deepseek-v3.2">deepseek-v3.2</option>
-                <option value="volcengine-doubao-seed-2.0-code">doubao-seed-2.0-code</option>
-                <option value="volcengine-doubao-seed-2.0-pro">doubao-seed-2.0-pro</option>
-                <option value="volcengine-doubao-seed-2.0-lite">doubao-seed-2.0-lite</option>
-                <option value="volcengine-doubao-seed-code">doubao-seed-code</option>
-                <option value="volcengine-minimax-m2.5">minimax-m2.5</option>
-                <option value="volcengine-glm-4.7">glm-4.7</option>
-                <option value="volcengine-kimi-k2.5">kimi-k2.5</option>
-              </optgroup>
-              <optgroup label="Ollama · local">
-                <option value="ollama-deepseek">deepseek-v3.2:cloud</option>
-                <option value="ollama-kimi">kimi-k2.5:cloud</option>
-                <option value="ollama-minimax">minimax-m2.5:cloud</option>
-              </optgroup>
+              <option value="" selected>加载模型中…</option>
             </select>
             <span class="pane-header-ai-tag">AI</span>
           </span>

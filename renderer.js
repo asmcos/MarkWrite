@@ -48,35 +48,53 @@ window.addEventListener('DOMContentLoaded', () => {
 
   let editor = null;
   let currentFilePath = null;
+  // 若 AI 通过 markwrite_apply_content 回写，则这里会收到 apply-editor-content
+  // （目前不再展示“未检测到可替换内容”的提示，因此这里只保留接收逻辑）
 
   /** 仅用于「润色/修改编辑框」工具：弹出确认后再应用，其他 tools（文件操作）不经过此流程 */
   function showApplyEditorConfirm(content, onDone) {
     const overlay = document.createElement('div');
     overlay.className = 'apply-editor-confirm-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:10000;';
     const box = document.createElement('div');
     box.className = 'apply-editor-confirm-box';
-    box.style.cssText = 'background:var(--pane-bg,#2d2d2d);color:var(--text-color,#e0e0e0);padding:20px;border-radius:8px;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,0.4);';
-    const preview = (content || '').slice(0, 180);
-    const previewText = (preview + ((content || '').length > 180 ? '…' : '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    box.innerHTML = [
-      '<p style="margin:0 0 12px;font-size:14px;">AI 建议将以下内容应用到编辑器，是否替换当前内容？</p>',
-      '<pre style="margin:0 0 16px;font-size:12px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,0.2);padding:10px;border-radius:4px;">',
-      previewText,
-      '</pre>',
-      '<div style="display:flex;gap:10px;justify-content:flex-end;">',
-      '<button type="button" class="apply-editor-cancel" style="padding:8px 16px;cursor:pointer;">取消</button>',
-      '<button type="button" class="apply-editor-ok" style="padding:8px 16px;cursor:pointer;background:#0e639c;color:#fff;border:none;border-radius:4px;">确认修改</button>',
-      '</div>',
-    ].join('');
+    const title = document.createElement('div');
+    title.className = 'apply-editor-confirm-title';
+    title.textContent = '应用到编辑器？';
+
+    const desc = document.createElement('div');
+    desc.className = 'apply-editor-confirm-desc';
+    desc.textContent = 'AI 生成了新的正文内容。为避免误覆盖，请确认后再替换当前编辑器内容。';
+
+    const preview = document.createElement('pre');
+    preview.className = 'apply-editor-confirm-preview';
+    const p = (content || '').slice(0, 400);
+    preview.textContent = p + ((content || '').length > 400 ? '\n…(已截断预览)…' : '');
+
+    const actions = document.createElement('div');
+    actions.className = 'apply-editor-confirm-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'apply-editor-btn apply-editor-btn-secondary apply-editor-cancel';
+    cancelBtn.textContent = '取消';
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'apply-editor-btn apply-editor-btn-primary apply-editor-ok';
+    okBtn.textContent = '确认修改';
+    actions.appendChild(cancelBtn);
+    actions.appendChild(okBtn);
+
+    box.appendChild(title);
+    box.appendChild(desc);
+    box.appendChild(preview);
+    box.appendChild(actions);
     overlay.appendChild(box);
     document.body.appendChild(overlay);
     const close = (confirmed) => {
       overlay.remove();
       if (typeof onDone === 'function') onDone(!!confirmed);
     };
-    box.querySelector('.apply-editor-ok').addEventListener('click', () => close(true));
-    box.querySelector('.apply-editor-cancel').addEventListener('click', () => close(false));
+    okBtn.addEventListener('click', () => close(true));
+    cancelBtn.addEventListener('click', () => close(false));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
   }
   let aiMode = 'chat';
@@ -371,33 +389,25 @@ window.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  const AI_MODEL_PRESETS = {
-    // OpenAgent：与 config.json 中的 provider / model 对应
-    'volcengine-ark-code-latest': { providerID: 'volcengine', modelID: 'ark-code-latest' },
-    'volcengine-deepseek-v3.2': { providerID: 'volcengine', modelID: 'deepseek-v3.2' },
-    'volcengine-doubao-seed-2.0-code': { providerID: 'volcengine', modelID: 'doubao-seed-2.0-code' },
-    'volcengine-doubao-seed-2.0-pro': { providerID: 'volcengine', modelID: 'doubao-seed-2.0-pro' },
-    'volcengine-doubao-seed-2.0-lite': { providerID: 'volcengine', modelID: 'doubao-seed-2.0-lite' },
-    'volcengine-doubao-seed-code': { providerID: 'volcengine', modelID: 'doubao-seed-code' },
-    'volcengine-minimax-m2.5': { providerID: 'volcengine', modelID: 'minimax-m2.5' },
-    'volcengine-glm-4.7': { providerID: 'volcengine', modelID: 'glm-4.7' },
-    'volcengine-kimi-k2.5': { providerID: 'volcengine', modelID: 'kimi-k2.5' },
-    'ollama-deepseek': { providerID: 'ollama', modelID: 'deepseek-v3.2:cloud' },
-    'ollama-kimi': { providerID: 'ollama', modelID: 'kimi-k2.5:cloud' },
-    'ollama-minimax': { providerID: 'ollama', modelID: 'minimax-m2.5:cloud' },
-  };
+  // 动态模型表：由后端从 config.json 读取 providers/models 后填充
+  const AI_MODEL_PRESETS = {};
   function modelToSelectValue(m) {
-    if (!m || typeof m !== 'object') return 'volcengine-deepseek-v3.2';
+    if (!m || typeof m !== 'object') return '';
     const pid = String(m.providerID || '');
     const mid = String(m.modelID || '');
     for (const k in AI_MODEL_PRESETS) {
       const v = AI_MODEL_PRESETS[k];
       if (v && v.providerID === pid && v.modelID === mid) return k;
     }
-    return 'volcengine-deepseek-v3.2';
+    return '';
   }
   const aiModelSelect = document.getElementById('ai-model-select');
   if (aiModelSelect && window.markwrite && window.markwrite.api && typeof window.markwrite.api.aiConfigGet === 'function') {
+    function clearOptions() {
+      if (!aiModelSelect) return;
+      aiModelSelect.innerHTML = '';
+    }
+
     function ensureOption(value, label, groupLabel) {
       if (!aiModelSelect) return;
       if ([...aiModelSelect.options].some((o) => o.value === value)) return;
@@ -425,8 +435,13 @@ window.addEventListener('DOMContentLoaded', () => {
         const directory = currentFilePath ? (currentFilePath.includes('/') ? currentFilePath.split('/').slice(0, -1).join('/') : undefined) : undefined;
         const r = await window.markwrite.api.aiModels(directory);
         if (!r || r.error) return;
+        // 重建 options：完全以 config.json 为准
+        clearOptions();
+        for (const k in AI_MODEL_PRESETS) delete AI_MODEL_PRESETS[k];
+
         const data = r.providers;
         const providers = Array.isArray(data?.providers) ? data.providers : (Array.isArray(data) ? data : []);
+        let firstValue = '';
         for (const p of providers) {
           if (!p || !p.id || !p.models) continue;
           const modelIDs = Object.keys(p.models || {});
@@ -434,23 +449,37 @@ window.addEventListener('DOMContentLoaded', () => {
             const m = p.models[mid];
             const status = m && m.status ? String(m.status) : '';
             if (status && status !== 'active') continue;
-            const value = `${p.id}/${mid}`;
             const presetKey = `${p.id}-${mid}`;
             if (!AI_MODEL_PRESETS[presetKey]) {
               AI_MODEL_PRESETS[presetKey] = { providerID: p.id, modelID: mid };
             }
-            const groupLabel = p.id === 'ollama' ? 'Ollama · local' : `Provider · ${p.id}`;
-            const label = (m && m.name) ? `${mid}` : mid;
+            const groupLabel = p.id === 'volcengine'
+              ? 'Volcengine Ark'
+              : (p.id === 'ollama' ? 'Ollama' : `Provider · ${p.id}`);
+            const label = (m && m.name) ? String(m.name) : mid;
             ensureOption(presetKey, label, groupLabel);
+            if (!firstValue) firstValue = presetKey;
           }
+        }
+
+        // 设置当前选中：优先使用保存的选择，否则选第一个
+        let desired = '';
+        try {
+          const cfg = await window.markwrite.api.aiConfigGet();
+          const saved = (cfg && cfg.openagent && cfg.openagent.model) || (cfg && cfg.opencode && cfg.opencode.model);
+          desired = modelToSelectValue(saved);
+        } catch (_) {}
+        aiModelSelect.value = desired || firstValue || '';
+        if (!aiModelSelect.value) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = '未在 config.json 中找到可用模型';
+          aiModelSelect.appendChild(opt);
+          aiModelSelect.value = '';
         }
       } catch (_) {}
     }
 
-    window.markwrite.api.aiConfigGet().then((cfg) => {
-      const m = (cfg && cfg.openagent && cfg.openagent.model) || (cfg && cfg.opencode && cfg.opencode.model);
-      aiModelSelect.value = modelToSelectValue(m);
-    }).catch(() => {});
     refreshModelsFromBackend();
     aiModelSelect.addEventListener('change', function () {
       const preset = AI_MODEL_PRESETS[aiModelSelect.value];
@@ -751,14 +780,15 @@ window.addEventListener('DOMContentLoaded', () => {
             summaryDiv.style.display = 'block';
             applyBtn.style.display = 'inline-block';
             applyBtn.onclick = () => {
-              if (editor) {
+              if (!editor) return;
+              showApplyEditorConfirm(appliedText, (confirmed) => {
+                if (!confirmed) return;
                 editor.setValue(appliedText);
                 appendMessage('system', '✅ 已全部替换到编辑器。');
-              }
+              });
             };
           } else if (!onlyFromCodeBlock && !hasLocalEdits) {
-            summaryDiv.textContent = '未检测到可替换的裸文档。请让 AI 将修改后的「完整正文」放在 ``` 代码块中再发送；或让 AI 按 EDIT: 原文\\t新文 格式输出局部修改。';
-            summaryDiv.style.display = 'block';
+            // 不再提示“未检测到可替换内容”，避免干扰用户阅读（用户可继续对话或让 AI 调用工具）。
           }
 
           if (hasLocalEdits) {
