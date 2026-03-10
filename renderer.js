@@ -673,6 +673,29 @@ window.addEventListener('DOMContentLoaded', () => {
     const msg = (aiInput && aiInput.value) ? aiInput.value.trim() : '';
     if (!msg) return;
 
+    // 本地快速回答：不走 AI，直接读取 Monaco 内容回显。
+    // 只要用户在问“编辑框内容是什么/帮我看看”，就拦截（避免 AI 说无法读取）。
+    const isEditorContentQuery =
+      /编辑(框|器)/.test(msg)
+      && /内容|正文|文本/.test(msg)
+      && /(是什么|是啥|查看|看看|帮我看|读一下|读取)/.test(msg);
+    if (isEditorContentQuery) {
+      const text = editor ? editor.getValue() : '';
+      const shown = (text || '').trim() ? text : '（当前编辑器为空）';
+      appendMessage('user', msg);
+      appendMessage('assistant', shown);
+      aiInput.value = '';
+      return;
+    }
+
+    // 若编辑器尚未初始化，直接提示并阻止发送（否则 editorContent 为空，AI 会误以为无正文）
+    if (!editor) {
+      appendMessage('user', msg);
+      appendMessage('system', '编辑器尚未就绪，请稍等 1-2 秒后再试。');
+      aiInput.value = '';
+      return;
+    }
+
     if (manualAiMode !== null) {
       aiMode = manualAiMode;
     } else {
