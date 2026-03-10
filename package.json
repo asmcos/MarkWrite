@@ -4,7 +4,8 @@
   "description": "MarkWrite - A local-first Markdown desktop app with AI-assisted writing, built on Electron.",
   "main": "main.js",
   "scripts": {
-    "start": "ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto electron ."
+    "start": "ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron ."
+
   },
   "keywords": [
     "markdown",
@@ -16,15 +17,20 @@
   "author": "",
   "license": "Apache-2.0",
   "dependencies": {
-    "@opencode-ai/sdk": "^1.2.0",
+    "ai": "^6.0.116",
     "bootstrap-icons": "^1.13.1",
+    "dotenv": "^17.3.1",
     "highlight.js": "^11.9.0",
     "markdown-it": "^14.0.0",
     "marked": "^12.0.0",
     "mermaid": "^11.12.3",
-    "monaco-editor": "^0.52.0"
+    "monaco-editor": "^0.52.0",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "electron": "^40.6.1"
+    "electron": "^40.6.1",
+    "openagent": "git+https://github.com/asmcos/openagent.git",
+    "@openagent/core": "file:./node_modules/openagent/packages/core",
+    "@openagent/app": "file:./node_modules/openagent/packages/app"
   }
 }

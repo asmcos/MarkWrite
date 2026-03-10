@@ -48,6 +48,37 @@ window.addEventListener('DOMContentLoaded', () => {
 
   let editor = null;
   let currentFilePath = null;
+
+  /** 仅用于「润色/修改编辑框」工具：弹出确认后再应用，其他 tools（文件操作）不经过此流程 */
+  function showApplyEditorConfirm(content, onDone) {
+    const overlay = document.createElement('div');
+    overlay.className = 'apply-editor-confirm-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:10000;';
+    const box = document.createElement('div');
+    box.className = 'apply-editor-confirm-box';
+    box.style.cssText = 'background:var(--pane-bg,#2d2d2d);color:var(--text-color,#e0e0e0);padding:20px;border-radius:8px;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,0.4);';
+    const preview = (content || '').slice(0, 180);
+    const previewText = (preview + ((content || '').length > 180 ? '…' : '')).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    box.innerHTML = [
+      '<p style="margin:0 0 12px;font-size:14px;">AI 建议将以下内容应用到编辑器，是否替换当前内容？</p>',
+      '<pre style="margin:0 0 16px;font-size:12px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-all;background:rgba(0,0,0,0.2);padding:10px;border-radius:4px;">',
+      previewText,
+      '</pre>',
+      '<div style="display:flex;gap:10px;justify-content:flex-end;">',
+      '<button type="button" class="apply-editor-cancel" style="padding:8px 16px;cursor:pointer;">取消</button>',
+      '<button type="button" class="apply-editor-ok" style="padding:8px 16px;cursor:pointer;background:#0e639c;color:#fff;border:none;border-radius:4px;">确认修改</button>',
+      '</div>',
+    ].join('');
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const close = (confirmed) => {
+      overlay.remove();
+      if (typeof onDone === 'function') onDone(!!confirmed);
+    };
+    box.querySelector('.apply-editor-ok').addEventListener('click', () => close(true));
+    box.querySelector('.apply-editor-cancel').addEventListener('click', () => close(false));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+  }
   let aiMode = 'chat';
   /** 用户手动选择的模式，null 表示由系统根据输入自动判断 */
   let manualAiMode = null;
@@ -110,6 +141,14 @@ window.addEventListener('DOMContentLoaded', () => {
     setFilename(null);
     setupMdToolbar(editor);
     setupMdPreview(editor);
+    if (window.markwrite && window.markwrite.api && typeof window.markwrite.api.onApplyEditorContent === 'function') {
+      window.markwrite.api.onApplyEditorContent((content) => {
+        if (!editor || typeof content !== 'string') return;
+        showApplyEditorConfirm(content, (confirmed) => {
+          if (confirmed) editor.setValue(content);
+        });
+      });
+    }
   }
 
   function setupMdPreview(ed) {
@@ -333,39 +372,93 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   const AI_MODEL_PRESETS = {
-    // OpenCode cloud / free
-    'opencode-gpt-5-nano': { providerID: 'opencode', modelID: 'gpt-5-nano' },
-    'opencode-trinity': { providerID: 'opencode', modelID: 'trinity-large-preview-free' },
-    'opencode-minimax': { providerID: 'opencode', modelID: 'minimax-m2.5' },
-    // Ollama via local 11434 (need to configure in OpenCode)
+    // OpenAgent：与 config.json 中的 provider / model 对应
+    'volcengine-ark-code-latest': { providerID: 'volcengine', modelID: 'ark-code-latest' },
+    'volcengine-deepseek-v3.2': { providerID: 'volcengine', modelID: 'deepseek-v3.2' },
+    'volcengine-doubao-seed-2.0-code': { providerID: 'volcengine', modelID: 'doubao-seed-2.0-code' },
+    'volcengine-doubao-seed-2.0-pro': { providerID: 'volcengine', modelID: 'doubao-seed-2.0-pro' },
+    'volcengine-doubao-seed-2.0-lite': { providerID: 'volcengine', modelID: 'doubao-seed-2.0-lite' },
+    'volcengine-doubao-seed-code': { providerID: 'volcengine', modelID: 'doubao-seed-code' },
+    'volcengine-minimax-m2.5': { providerID: 'volcengine', modelID: 'minimax-m2.5' },
+    'volcengine-glm-4.7': { providerID: 'volcengine', modelID: 'glm-4.7' },
+    'volcengine-kimi-k2.5': { providerID: 'volcengine', modelID: 'kimi-k2.5' },
     'ollama-deepseek': { providerID: 'ollama', modelID: 'deepseek-v3.2:cloud' },
     'ollama-kimi': { providerID: 'ollama', modelID: 'kimi-k2.5:cloud' },
     'ollama-minimax': { providerID: 'ollama', modelID: 'minimax-m2.5:cloud' },
   };
   function modelToSelectValue(m) {
-    if (!m || typeof m !== 'object') return 'opencode-gpt-5-nano';
-    const id = (m.providerID || '') + '/' + (m.modelID || '');
-    if (id === 'opencode/gpt-5-nano') return 'opencode-gpt-5-nano';
-    if (id === 'opencode/trinity-large-preview-free') return 'opencode-trinity';
-    if (id === 'opencode/minimax-m2.5') return 'opencode-minimax';
-    if (id === 'ollama/deepseek-v3.2:cloud') return 'ollama-deepseek';
-    if (id === 'ollama/kimi-k2.5:cloud') return 'ollama-kimi';
-    if (id === 'ollama/minimax-m2.5:cloud') return 'ollama-minimax';
-    return 'opencode-gpt-5-nano';
+    if (!m || typeof m !== 'object') return 'volcengine-deepseek-v3.2';
+    const pid = String(m.providerID || '');
+    const mid = String(m.modelID || '');
+    for (const k in AI_MODEL_PRESETS) {
+      const v = AI_MODEL_PRESETS[k];
+      if (v && v.providerID === pid && v.modelID === mid) return k;
+    }
+    return 'volcengine-deepseek-v3.2';
   }
   const aiModelSelect = document.getElementById('ai-model-select');
   if (aiModelSelect && window.markwrite && window.markwrite.api && typeof window.markwrite.api.aiConfigGet === 'function') {
+    function ensureOption(value, label, groupLabel) {
+      if (!aiModelSelect) return;
+      if ([...aiModelSelect.options].some((o) => o.value === value)) return;
+
+      // Find or create optgroup
+      let group = null;
+      if (groupLabel) {
+        group = [...aiModelSelect.querySelectorAll('optgroup')].find((g) => g.label === groupLabel) || null;
+        if (!group) {
+          group = document.createElement('optgroup');
+          group.label = groupLabel;
+          aiModelSelect.appendChild(group);
+        }
+      }
+
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = label || value;
+      (group || aiModelSelect).appendChild(opt);
+    }
+
+    async function refreshModelsFromBackend() {
+      if (!window.markwrite.api.aiModels) return;
+      try {
+        const directory = currentFilePath ? (currentFilePath.includes('/') ? currentFilePath.split('/').slice(0, -1).join('/') : undefined) : undefined;
+        const r = await window.markwrite.api.aiModels(directory);
+        if (!r || r.error) return;
+        const data = r.providers;
+        const providers = Array.isArray(data?.providers) ? data.providers : (Array.isArray(data) ? data : []);
+        for (const p of providers) {
+          if (!p || !p.id || !p.models) continue;
+          const modelIDs = Object.keys(p.models || {});
+          for (const mid of modelIDs) {
+            const m = p.models[mid];
+            const status = m && m.status ? String(m.status) : '';
+            if (status && status !== 'active') continue;
+            const value = `${p.id}/${mid}`;
+            const presetKey = `${p.id}-${mid}`;
+            if (!AI_MODEL_PRESETS[presetKey]) {
+              AI_MODEL_PRESETS[presetKey] = { providerID: p.id, modelID: mid };
+            }
+            const groupLabel = p.id === 'ollama' ? 'Ollama · local' : `Provider · ${p.id}`;
+            const label = (m && m.name) ? `${mid}` : mid;
+            ensureOption(presetKey, label, groupLabel);
+          }
+        }
+      } catch (_) {}
+    }
+
     window.markwrite.api.aiConfigGet().then((cfg) => {
-      const m = cfg && cfg.opencode && cfg.opencode.model;
+      const m = (cfg && cfg.openagent && cfg.openagent.model) || (cfg && cfg.opencode && cfg.opencode.model);
       aiModelSelect.value = modelToSelectValue(m);
     }).catch(() => {});
+    refreshModelsFromBackend();
     aiModelSelect.addEventListener('change', function () {
       const preset = AI_MODEL_PRESETS[aiModelSelect.value];
       if (!preset) return;
       window.markwrite.api.aiConfigGet().then((cfg) => {
         if (!cfg) cfg = {};
-        if (!cfg.opencode) cfg.opencode = {};
-        cfg.opencode = { ...cfg.opencode, model: preset };
+        if (!cfg.openagent) cfg.openagent = {};
+        cfg.openagent = { ...cfg.openagent, model: preset };
         return window.markwrite.api.aiConfigSave(cfg);
       }).catch(() => {});
     });
@@ -412,18 +505,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
       window.markwrite.api.aiHealth().then((r) => {
         if (r && r.ok) {
-          const name = r.backend === 'opencode' ? 'OpenCode' : r.backend || 'AI';
+          const name = r.backend === 'openagent' ? 'OpenAgent' : r.backend || 'AI';
           const extra = r.selfStarted ? '（已自动启动）' : '';
           setAiStatus(true, `${name} 已连接${extra}`);
           statusEl.textContent = `${name} 已连接${extra}${r.version ? ' ' + r.version : ''}。可直接在下方输入与 AI 对话，例如：“帮我重命名当前文档”“修改文内标题”等。`;
         } else {
           setAiStatus(false, (r && r.message) ? r.message : 'Disconnected · 请配置后端');
-          statusEl.textContent = r && r.message ? r.message : 'AI 后端未连接。请在设置中选择后端（OpenCode/OpenClaw）并配置。';
+          statusEl.textContent = r && r.message ? r.message : 'AI 后端未连接。请在设置中选择后端（OpenAgent/OpenClaw）并配置。';
         }
         aiMessages.scrollTop = aiMessages.scrollHeight;
       }).catch(() => {
         setAiStatus(false, 'Disconnected · 请配置后端');
-        statusEl.textContent = 'AI 后端未连接。请在设置中配置后端（如 OpenCode：默认 http://127.0.0.1:4096）。';
+        statusEl.textContent = 'AI 后端未连接。请配置 OpenAgent（config.json 与 .env 中的 API Key）。';
         aiMessages.scrollTop = aiMessages.scrollHeight;
       });
     } else {

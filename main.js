@@ -35,6 +35,25 @@ function createServer() {
       pathname = decodeURIComponent(u.pathname).replace(/^\//, '') || 'index.html';
       if (pathname === '') pathname = 'index.html';
     } catch (_) {}
+    // 供 OpenAgent 工具或外部回调：无文件名时润色/编辑结果直接应用到编辑器（POST 到此）
+    if (req.method === 'POST' && pathname === 'apply-content') {
+      const chunks = [];
+      req.on('data', (chunk) => chunks.push(chunk));
+      req.on('end', () => {
+        let content = '';
+        try {
+          const body = Buffer.concat(chunks).toString('utf8');
+          const json = JSON.parse(body);
+          content = typeof json.content === 'string' ? json.content : '';
+        } catch (_) {}
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+          mainWindow.webContents.send('apply-editor-content', content);
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+      return;
+    }
     const filePath = path.join(ROOT, pathname);
 
     fs.readFile(filePath, (err, data) => {
@@ -193,10 +212,15 @@ app.whenReady().then(() => {
     const message = payload && typeof payload.message === 'string' ? payload.message : (payload || '');
     const context = payload && typeof payload === 'object' && 'context' in payload ? payload.context : undefined;
     const fn = aiBackend && typeof aiBackend.docEdit === 'function' ? aiBackend.docEdit : null;
-    return fn ? fn(message, context) : { error: '智能文档 Agent 未就绪，请使用 OpenCode 后端' };
+    return fn ? fn(message, context) : { error: '智能文档 Agent 未就绪，请使用 OpenAgent 后端' };
   });
   ipcMain.handle('ai:health', async () => {
     return aiBackend ? aiBackend.health() : { ok: false, message: 'AI 后端未初始化' };
+  });
+  ipcMain.handle('ai:models', async (_, payload) => {
+    const directory = payload && typeof payload.directory === 'string' ? payload.directory : undefined;
+    const fn = aiBackend && typeof aiBackend.models === 'function' ? aiBackend.models : null;
+    return fn ? fn({ directory }) : { error: '当前后端不支持列出模型（请使用 OpenAgent 后端）' };
   });
   ipcMain.handle('ai:config:get', () => getAiConfig(userDataPath));
   ipcMain.handle('ai:config:save', (_, config) => {
@@ -212,6 +236,12 @@ app.whenReady().then(() => {
     const server = createServer();
     server.listen(port, '127.0.0.1', () => {
       app.port = port;
+      const baseUrl = `http://127.0.0.1:${port}`;
+      try {
+        const markwriteDir = path.join(os.homedir(), '.config', 'markwrite');
+        fs.mkdirSync(markwriteDir, { recursive: true });
+        fs.writeFileSync(path.join(markwriteDir, 'apply-url'), baseUrl, 'utf8');
+      } catch (_) {}
       createWindow(port);
     });
     server.once('error', (err) => {

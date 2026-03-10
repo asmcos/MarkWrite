@@ -805,12 +805,18 @@
           <span class="pane-header-actions">
             <label class="ai-model-label">模型</label>
             <select id="ai-model-select" class="ai-model-select" title="AI 模型">
-              <optgroup label="OpenCode · free">
-                <option value="opencode-gpt-5-nano">gpt-5-nano</option>
-                <option value="opencode-trinity">trinity-large-preview-free</option>
-                <option value="opencode-minimax">minimax-m2.5</option>
+              <optgroup label="Volcengine Ark · OpenAgent">
+                <option value="volcengine-ark-code-latest">ark-code-latest</option>
+                <option value="volcengine-deepseek-v3.2">deepseek-v3.2</option>
+                <option value="volcengine-doubao-seed-2.0-code">doubao-seed-2.0-code</option>
+                <option value="volcengine-doubao-seed-2.0-pro">doubao-seed-2.0-pro</option>
+                <option value="volcengine-doubao-seed-2.0-lite">doubao-seed-2.0-lite</option>
+                <option value="volcengine-doubao-seed-code">doubao-seed-code</option>
+                <option value="volcengine-minimax-m2.5">minimax-m2.5</option>
+                <option value="volcengine-glm-4.7">glm-4.7</option>
+                <option value="volcengine-kimi-k2.5">kimi-k2.5</option>
               </optgroup>
-              <optgroup label="Ollama · local / 11434">
+              <optgroup label="Ollama · local">
                 <option value="ollama-deepseek">deepseek-v3.2:cloud</option>
                 <option value="ollama-kimi">kimi-k2.5:cloud</option>
                 <option value="ollama-minimax">minimax-m2.5:cloud</option>
@@ -824,7 +830,7 @@
             <div class="pill-row">
               <span class="pill-label">模式</span>
               <button type="button" class="pill pill-mode active" id="ai-mode-chat" title="修改/润色文档，AI 返回代码块后点击替换">聊天</button>
-              <button type="button" class="pill pill-mode" id="ai-mode-cmd" title="重命名、创建文件等，由 OpenCode 执行 read/edit/write 工具（若回复出现 &lt;function_calls&gt; 表示工具未执行）">命令</button>
+              <button type="button" class="pill pill-mode" id="ai-mode-cmd" title="重命名、创建文件等，由 OpenAgent 执行 read_file/write_file 等工具">命令</button>
             </div>
             <div class="status-row" id="ai-status-row">
               <div class="status-dot" id="ai-status-dot"></div>

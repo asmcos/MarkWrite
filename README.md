@@ -2,7 +2,7 @@
 
 ## 概述
 
-MarkWrite 是一个用于编辑 Markdown 文件的弹窗式编辑器。它提供了简洁的界面和必要的编辑功能。
+MarkWrite 是一个用于编辑 Markdown 文件的桌面编辑器，提供简洁的编辑界面与**智能体辅助**能力。AI 能力基于自研 **OpenAgent** 框架，支持对话润色、文档修改及文件操作（创建/读/写/搜等），可在右侧 Chat 面板中直接使用。
 
 ## 主要功能
 
@@ -15,6 +15,14 @@ MarkWrite 是一个用于编辑 Markdown 文件的弹窗式编辑器。它提供
 - **Markdown 支持**: 完全支持标准 Markdown 语法
 - **实时预览**: 可以在编辑同时查看渲染效果
 - **语法高亮**: Markdown 语法组件自动高亮显示
+
+### 智能体辅助（OpenAgent）
+
+MarkWrite 集成 **自研 OpenAgent 框架**，在编辑器右侧提供 AI 对话与智能操作能力，无需单独启动外部服务。
+
+- **聊天 / 润色**：与 AI 对话、对当前文档进行润色、修改、改写、翻译等；AI 可返回修改后的全文，经你**确认后再替换**到编辑框。
+- **命令 / 文件操作**：通过自然语言指示 AI 执行**文件级操作**，如创建文件、读取/修改/删除文件、列目录、按内容搜索等，由 OpenAgent 的 tools（如 `read_file`、`write_file`）直接完成，无需再确认。
+- **模型与配置**：支持多模型切换（如火山引擎 Ark、Ollama 等），配置写在项目或用户目录的 `config.json`（API Key 等）与 `markwrite-ai-config.json`（后端与模型选择）。详见 `docs/openagent-install.md` 与 `lib/README.md`。
 
 ## 快捷键
 
