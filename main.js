@@ -173,6 +173,21 @@ ipcMain.handle('file:save', async (_, filePath, content) => {
   return true;
 });
 
+// 保存到指定路径：若传入相对路径，则以当前进程工作目录为基准（通常为 MarkWrite 项目目录）
+ipcMain.handle('file:saveTo', async (_, targetPath, content) => {
+  if (!targetPath || typeof targetPath !== 'string') return null;
+  const p = targetPath.trim();
+  if (!p) return null;
+  try {
+    const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, content || '', 'utf8');
+    return abs;
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+});
+
 ipcMain.handle('file:saveAs', async (_, content) => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const result = await dialog.showSaveDialog(win, {

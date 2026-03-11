@@ -159,6 +159,9 @@ window.addEventListener('DOMContentLoaded', () => {
     setFilename(null);
     setupMdToolbar(editor);
     setupMdPreview(editor);
+    // 供 main 进程通过 executeJavaScript 读取当前编辑框内容（Agent 工具 markwrite_get_editor_content）
+    window.__markwrite_getEditorContent = function () { return editor ? editor.getValue() : ''; };
+    window.__markwrite_getEditorFilename = function () { return currentFilePath || '未命名'; };
     if (window.markwrite && window.markwrite.api && typeof window.markwrite.api.onApplyEditorContent === 'function') {
       window.markwrite.api.onApplyEditorContent((content) => {
         if (!editor || typeof content !== 'string') return;

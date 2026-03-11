@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('markwrite', {
     openFile: () => ipcRenderer.invoke('file:open'),
     fileRead: (filePath) => ipcRenderer.invoke('file:read', filePath),
     saveFile: (filePath, content) => ipcRenderer.invoke('file:save', filePath, content),
+    saveTo: (targetPath, content) => ipcRenderer.invoke('file:saveTo', targetPath, content),
     saveAs: (content) => ipcRenderer.invoke('file:saveAs', content),
     renderMarkdown: (markdown) => ipcRenderer.invoke('markdown:render', markdown),
     aiChat: (message, context) => ipcRenderer.invoke('ai:chat', { message, context }),
