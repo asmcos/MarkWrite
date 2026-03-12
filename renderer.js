@@ -214,6 +214,17 @@ window.addEventListener('DOMContentLoaded', () => {
     } catch (_) {}
   }
 
+  function markFileSelected(targetPath) {
+    if (!fileTreeEl) return;
+    const items = fileTreeEl.querySelectorAll('.file-list-item');
+    items.forEach((el) => {
+      if (!el || !el.dataset) return;
+      const p = el.dataset.path;
+      if (p === targetPath) el.classList.add('is-selected');
+      else el.classList.remove('is-selected');
+    });
+  }
+
   function renderFileTreeNode(entry, depth) {
     const li = document.createElement('li');
     li.className = 'file-list-item' + (entry.isDir ? ' is-dir' : '');
@@ -223,7 +234,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     const indent = document.createElement('span');
     indent.className = 'file-indent';
-    indent.style.marginLeft = depth > 0 ? (2 + depth * 12) + 'px' : '2px';
+    indent.style.marginLeft = depth > 0 ? (depth * 12) + 'px' : '0px';
     li.appendChild(indent);
 
     const toggle = document.createElement('span');
@@ -267,6 +278,7 @@ window.addEventListener('DOMContentLoaded', () => {
           fileTreeState[entry.path] = !cur;
           saveFileTreeState();
           await loadFileTree();
+          markFileSelected(entry.path);
         }
       });
     } else {
@@ -276,6 +288,7 @@ window.addEventListener('DOMContentLoaded', () => {
         if (res && typeof res.content === 'string') {
           editor.setValue(res.content);
           setFilename(entry.path);
+          markFileSelected(entry.path);
         }
       });
     }

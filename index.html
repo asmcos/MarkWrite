@@ -352,10 +352,30 @@
         box-shadow:
           0 18px 45px rgba(15, 23, 42, 0.9),
           0 0 0 1px rgba(15, 23, 42, 0.8);
-        padding: 16px;
+        padding: 10px 16px 16px 10px; /* 左侧更靠内一点 */
         display: flex;
         flex-direction: column;
         overflow: hidden;
+      }
+      /* 左侧文件树：当文件很多时支持垂直滚动，只作用于 Files 面板 */
+      .pane-files .pane-body {
+        overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+      }
+      .pane-files .pane-body::-webkit-scrollbar {
+        width: 6px;
+      }
+      .pane-files .pane-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .pane-files .pane-body::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.7);
+        border-radius: 999px;
+      }
+      .pane-files .pane-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(56, 189, 248, 0.85);
       }
       .tab-strip {
         display: flex;
@@ -419,7 +439,7 @@
       }
       .file-list {
         list-style: none;
-        padding: 4px 0;
+        padding: 2px 0 4px 2px; /* 整体稍微向左靠一点 */
         margin: 0;
         font-size: 12px;
         color: #e5e7eb;
@@ -430,25 +450,34 @@
         cursor: default;
         display: flex;
         align-items: center;
-        gap: 5px;
+         
         user-select: none;
       }
       .file-list-item:hover {
         background: rgba(15, 23, 42, 0.9);
       }
+      .file-list-item.is-selected {
+        background: linear-gradient(90deg, rgba(59, 130, 246, 0.22), rgba(15, 23, 42, 0.95));
+        border-radius: 5px;
+      }
+      .file-list-item.is-selected .file-name {
+        color: #e5e7eb;
+        font-weight: 500;
+      }
       .file-indent {
-        width: 10px;
+        width: 6px;
         flex: 0 0 auto;
       }
       .file-toggle {
-        width: 16px;
-        height: 16px;
+        width: 18px;
+        height: 18px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        color: #6b7280;
-        font-size: 10px;
+        color: #9ca3af;
+        font-size: 13px; /* 箭头更大一些 */
+        line-height: 1;
       }
       .file-toggle.hidden {
         visibility: hidden;
