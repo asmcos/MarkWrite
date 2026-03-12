@@ -36,10 +36,13 @@ window.addEventListener('DOMContentLoaded', () => {
   const container = document.getElementById('monaco-container');
   const editorFilename = document.getElementById('editor-filename');
   const btnOpen = document.getElementById('btn-open');
+  const btnToggleExplorer = document.getElementById('btn-toggle-explorer');
+  const btnExpandExplorer = document.getElementById('btn-expand-explorer');
   const btnSave = document.getElementById('btn-save');
   const btnSaveAs = document.getElementById('btn-saveas');
   const previewToggle = document.getElementById('preview-toggle');
   const editorWithPreview = document.getElementById('editor-with-preview');
+  const splitterChat = document.getElementById('splitter-chat');
   const aiMessages = document.getElementById('ai-messages');
   const aiInput = document.getElementById('ai-input');
   const aiSend = document.getElementById('ai-send');
@@ -100,6 +103,86 @@ window.addEventListener('DOMContentLoaded', () => {
   let aiMode = 'chat';
   /** 用户手动选择的模式，null 表示由系统根据输入自动判断 */
   let manualAiMode = null;
+
+  // ---- VSCode-like 布局：聊天宽度拖拽 + 文件侧栏收起/展开 ----
+  const LAYOUT_CHAT_WIDTH_KEY = 'markwrite-layout-chat-width'; // number px
+  const LAYOUT_EXPLORER_HIDDEN_KEY = 'markwrite-layout-explorer-hidden'; // '1' | '0'
+
+  function getChatWidth() {
+    try {
+      const v = parseInt(localStorage.getItem(LAYOUT_CHAT_WIDTH_KEY) || '', 10);
+      if (!Number.isFinite(v)) return 320;
+      return Math.max(240, Math.min(900, v));
+    } catch (_) {
+      return 320;
+    }
+  }
+
+  function getExplorerHidden() {
+    try {
+      return localStorage.getItem(LAYOUT_EXPLORER_HIDDEN_KEY) === '1';
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function applyLayoutState() {
+    const explorerHidden = getExplorerHidden();
+    document.body.setAttribute('data-explorer-hidden', explorerHidden ? '1' : '0');
+    document.documentElement.style.setProperty('--chat-width', `${getChatWidth()}px`);
+
+    if (btnToggleExplorer) {
+      btnToggleExplorer.title = explorerHidden ? '展开文件侧栏' : '收起文件侧栏';
+    }
+    if (btnExpandExplorer) {
+      btnExpandExplorer.title = explorerHidden ? '展开文件侧栏' : '文件侧栏已展开';
+    }
+  }
+
+  function toggleExplorer() {
+    const nextHidden = !getExplorerHidden();
+    try { localStorage.setItem(LAYOUT_EXPLORER_HIDDEN_KEY, nextHidden ? '1' : '0'); } catch (_) {}
+    applyLayoutState();
+  }
+
+  applyLayoutState();
+  if (btnToggleExplorer) btnToggleExplorer.addEventListener('click', toggleExplorer);
+  if (btnExpandExplorer) btnExpandExplorer.addEventListener('click', () => {
+    try { localStorage.setItem(LAYOUT_EXPLORER_HIDDEN_KEY, '0'); } catch (_) {}
+    applyLayoutState();
+  });
+
+  // 右侧聊天面板宽度：拖拽分隔线调整（像 VSCode）
+  if (splitterChat) {
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 320;
+    const onMove = (e) => {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const next = Math.max(240, Math.min(900, startWidth - dx));
+      document.documentElement.style.setProperty('--chat-width', `${next}px`);
+    };
+    const onUp = (e) => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove('is-resizing');
+      const dx = e.clientX - startX;
+      const next = Math.max(240, Math.min(900, startWidth - dx));
+      try { localStorage.setItem(LAYOUT_CHAT_WIDTH_KEY, String(next)); } catch (_) {}
+      document.documentElement.style.setProperty('--chat-width', `${next}px`);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    splitterChat.addEventListener('mousedown', (e) => {
+      dragging = true;
+      startX = e.clientX;
+      startWidth = getChatWidth();
+      document.body.classList.add('is-resizing');
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    });
+  }
 
   // 预览开关：默认打开；点击「预览」在显示/隐藏之间切换
   const PREVIEW_KEY = 'markwrite-preview-open';

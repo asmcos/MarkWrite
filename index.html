@@ -201,7 +201,7 @@
       .app-container {
         flex: 1;
         display: grid;
-        grid-template-columns: 240px 1fr 320px;
+        grid-template-columns: var(--files-width, 240px) 1fr 6px var(--chat-width, 320px);
         grid-template-rows: 1fr;
         min-height: 0;
         height: calc(100vh - 28px - 28px - 20px - 8px);
@@ -209,6 +209,87 @@
         padding: 0 12px 8px;
         background: radial-gradient(circle at top, #1f2937 0, #020617 40%);
         color: #e5e7eb;
+        position: relative;
+      }
+      /* Explorer hidden */
+      body[data-explorer-hidden="1"] .app-container {
+        grid-template-columns: 0px 1fr 6px var(--chat-width, 320px);
+      }
+      body[data-explorer-hidden="1"] .pane-files {
+        display: none;
+      }
+      body[data-explorer-hidden="1"] #btn-open {
+        display: none;
+      }
+      .pane-files { grid-column: 1; }
+      .pane-editor { grid-column: 2; }
+      .pane-splitter-chat { grid-column: 3; }
+      .pane-chat { grid-column: 4; }
+
+      .splitter {
+        width: 6px;
+        cursor: col-resize;
+        position: relative;
+        background: transparent;
+      }
+      .splitter::before {
+        content: '';
+        position: absolute;
+        top: 14px;
+        bottom: 14px;
+        left: 2px;
+        right: 2px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.14);
+        border: 1px solid rgba(148, 163, 184, 0.18);
+      }
+      .splitter:hover::before {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: rgba(56, 189, 248, 0.35);
+      }
+      body.is-resizing .splitter::before {
+        background: rgba(56, 189, 248, 0.25);
+        border-color: rgba(56, 189, 248, 0.55);
+      }
+
+      .icon-btn {
+        width: 26px;
+        height: 26px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 7px;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: rgba(15, 23, 42, 0.78);
+        color: #94a3b8;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 0;
+      }
+      .icon-btn:hover {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: rgba(56, 189, 248, 0.45);
+        color: #e2e8f0;
+      }
+
+      .collapsed-explorer-handle {
+        display: none;
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        bottom: 20px;
+        width: 34px;
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        background: linear-gradient(145deg, rgba(15, 23, 42, 0.86), rgba(15, 23, 42, 0.62));
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.75);
+        align-items: flex-start;
+        justify-content: center;
+        padding-top: 10px;
+        z-index: 10;
+      }
+      body[data-explorer-hidden="1"] .collapsed-explorer-handle {
+        display: flex;
       }
       .pane {
         border-right: 1px solid rgba(148, 163, 184, 0.2);
@@ -811,10 +892,21 @@
       </div>
     </div>
     <div class="app-container">
-      <div class="pane">
+      <div class="collapsed-explorer-handle">
+        <button type="button" class="icon-btn" id="btn-expand-explorer" title="展开文件侧栏">
+          <i class="bi bi-layout-sidebar-inset"></i>
+        </button>
+      </div>
+
+      <div class="pane pane-files" id="pane-files">
         <div class="pane-header">
           <div>Files</div>
-          <span>Explorer</span>
+          <span class="pane-header-actions">
+            <span>Explorer</span>
+            <button type="button" class="icon-btn" id="btn-toggle-explorer" title="收起文件侧栏">
+              <i class="bi bi-layout-sidebar-inset-reverse"></i>
+            </button>
+          </span>
         </div>
         <div class="pane-body">
           <ul class="file-list">
@@ -837,7 +929,7 @@
         </div>
       </div>
 
-      <div class="pane">
+      <div class="pane pane-editor" id="pane-editor">
         <div class="pane-header">
           <div>Editor</div>
           <span class="pane-header-actions">
@@ -887,7 +979,9 @@
         </div>
       </div>
 
-      <div class="pane">
+      <div class="splitter pane-splitter-chat" id="splitter-chat" title="拖动调整聊天宽度"></div>
+
+      <div class="pane pane-chat" id="pane-chat">
         <div class="pane-header pane-header-chat">
           <div>Chat</div>
           <span class="pane-header-actions">
