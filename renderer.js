@@ -43,6 +43,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const previewToggle = document.getElementById('preview-toggle');
   const editorWithPreview = document.getElementById('editor-with-preview');
   const splitterChat = document.getElementById('splitter-chat');
+  const fileTreeEl = document.getElementById('file-tree');
   const aiMessages = document.getElementById('ai-messages');
   const aiInput = document.getElementById('ai-input');
   const aiSend = document.getElementById('ai-send');
@@ -183,6 +184,130 @@ window.addEventListener('DOMContentLoaded', () => {
       window.addEventListener('mouseup', onUp);
     });
   }
+
+  // 文件树：简单目录浏览，root = 应用工作目录
+  const FILE_TREE_KEY = 'markwrite-filetree-expanded'; // JSON: { [path]: boolean }
+  const FILE_TREE_ROOT_KEY = 'markwrite-filetree-root'; // string | null
+  let fileRootPath = null;
+  try {
+    const rawRoot = localStorage.getItem(FILE_TREE_ROOT_KEY);
+    if (rawRoot && typeof rawRoot === 'string') fileRootPath = rawRoot;
+  } catch (_) {
+    fileRootPath = null;
+  }
+  let fileTreeState = {};
+  try {
+    const raw = localStorage.getItem(FILE_TREE_KEY);
+    if (raw) fileTreeState = JSON.parse(raw) || {};
+  } catch (_) {
+    fileTreeState = {};
+  }
+  function saveFileTreeState() {
+    try { localStorage.setItem(FILE_TREE_KEY, JSON.stringify(fileTreeState)); } catch (_) {}
+  }
+
+  function setFileRoot(path) {
+    fileRootPath = path || null;
+    try {
+      if (fileRootPath) localStorage.setItem(FILE_TREE_ROOT_KEY, fileRootPath);
+      else localStorage.removeItem(FILE_TREE_ROOT_KEY);
+    } catch (_) {}
+  }
+
+  function renderFileTreeNode(entry, depth) {
+    const li = document.createElement('li');
+    li.className = 'file-list-item' + (entry.isDir ? ' is-dir' : '');
+    li.dataset.path = entry.path;
+    li.dataset.isDir = entry.isDir ? '1' : '0';
+    li.dataset.depth = String(depth);
+
+    const indent = document.createElement('span');
+    indent.className = 'file-indent';
+    indent.style.marginLeft = depth > 0 ? (2 + depth * 12) + 'px' : '2px';
+    li.appendChild(indent);
+
+    const toggle = document.createElement('span');
+    toggle.className = 'file-toggle';
+    if (!entry.isDir) toggle.classList.add('hidden');
+    toggle.textContent = entry.isDir
+      ? (fileTreeState[entry.path] ? '▾' : '▸')
+      : '';
+    li.appendChild(toggle);
+
+    const icon = document.createElement('span');
+    icon.className = 'file-icon';
+    if (entry.isDir) {
+      icon.innerHTML = '<i class="bi bi-folder2"></i>';
+    } else {
+      const name = entry.name || '';
+      const idx = name.lastIndexOf('.');
+      const ext = idx > 0 ? name.slice(idx + 1).toLowerCase() : '';
+      let cls = 'bi-file-earmark-text';
+      if (ext === 'md' || ext === 'markdown') cls = 'bi-journal-text';
+      else if (ext === 'js' || ext === 'jsx') cls = 'bi-filetype-js';
+      else if (ext === 'ts' || ext === 'tsx') cls = 'bi-filetype-tsx';
+      else if (ext === 'json') cls = 'bi-filetype-json';
+      else if (ext === 'png' || ext === 'jpg' || ext === 'jpeg' || ext === 'gif' || ext === 'webp') cls = 'bi-file-image';
+      else if (ext === 'css' || ext === 'scss' || ext === 'less') cls = 'bi-filetype-css';
+      else if (ext === 'html' || ext === 'htm') cls = 'bi-filetype-html';
+      icon.innerHTML = `<i class="bi ${cls}"></i>`;
+    }
+    li.appendChild(icon);
+
+    const name = document.createElement('span');
+    name.className = 'file-name';
+    name.textContent = entry.name;
+    li.appendChild(name);
+
+    if (entry.isDir) {
+      li.addEventListener('click', async (e) => {
+        // 点击 toggle 或行都展开/收起
+        if (e.target === toggle || e.target === name || e.target === icon || e.target === indent) {
+          const cur = !!fileTreeState[entry.path];
+          fileTreeState[entry.path] = !cur;
+          saveFileTreeState();
+          await loadFileTree();
+        }
+      });
+    } else {
+      li.addEventListener('click', async () => {
+        if (!window.markwrite || !window.markwrite.api || !editor) return;
+        const res = await window.markwrite.api.fileRead(entry.path);
+        if (res && typeof res.content === 'string') {
+          editor.setValue(res.content);
+          setFilename(entry.path);
+        }
+      });
+    }
+    return li;
+  }
+
+  async function buildTree(basePath, depth, container) {
+    const res = await window.markwrite.api.listDir(basePath || null);
+    if (!res || res.error) return;
+    const { path: base, entries } = res;
+    for (const entry of (entries || [])) {
+      const node = renderFileTreeNode(
+        { ...entry, parentPath: base },
+        depth
+      );
+      container.appendChild(node);
+      if (entry.isDir && fileTreeState[entry.path]) {
+        // 递归展开已标记为展开的目录（保证子目录紧跟在父目录后面）
+        // eslint-disable-next-line no-await-in-loop
+        await buildTree(entry.path, depth + 1, container);
+      }
+    }
+  }
+
+  async function loadFileTree() {
+    if (!fileTreeEl || !window.markwrite || !window.markwrite.api) return;
+    fileTreeEl.innerHTML = '';
+    await buildTree(fileRootPath, 0, fileTreeEl);
+  }
+
+  // 启动时加载一次文件树（默认 root = 应用工作目录）
+  void loadFileTree();
 
   // 预览开关：默认打开；点击「预览」在显示/隐藏之间切换
   const PREVIEW_KEY = 'markwrite-preview-open';
@@ -427,9 +552,19 @@ window.addEventListener('DOMContentLoaded', () => {
   if (btnOpen && window.markwrite && window.markwrite.api) {
     btnOpen.addEventListener('click', async () => {
       const result = await window.markwrite.api.openFile();
-      if (result && editor) {
+      if (!result) return;
+      // 若选择的是目录，则将该目录作为文件树根；若选择的是文件，则打开文件并将其所在目录作为文件树根
+      if (result.directory) {
+        setFileRoot(result.directory);
+        await loadFileTree();
+      } else if (result.filePath && editor) {
         editor.setValue(result.content);
         setFilename(result.filePath);
+        const dir = result.filePath.replace(/[\\/][^\\/]+$/, '');
+        if (dir) {
+          setFileRoot(dir);
+          await loadFileTree();
+        }
       }
     });
   }

@@ -145,16 +145,22 @@ function ensureLinuxDesktopFile() {
 ipcMain.handle('file:open', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
   const result = await dialog.showOpenDialog(win, {
-    properties: ['openFile'],
+    properties: ['openFile', 'openDirectory'],
     filters: [
       { name: 'Markdown', extensions: ['md', 'markdown'] },
       { name: 'All', extensions: ['*'] },
     ],
   });
   if (result.canceled || !result.filePaths.length) return null;
-  const filePath = result.filePaths[0];
-  const content = fs.readFileSync(filePath, 'utf8');
-  return { filePath, content };
+  const targetPath = result.filePaths[0];
+  try {
+    const stat = fs.statSync(targetPath);
+    if (stat.isDirectory()) {
+      return { directory: targetPath };
+    }
+  } catch (_) {}
+  const content = fs.readFileSync(targetPath, 'utf8');
+  return { filePath: targetPath, content };
 });
 
 ipcMain.handle('file:read', async (_, filePath) => {
@@ -199,6 +205,34 @@ ipcMain.handle('file:saveAs', async (_, content) => {
   if (result.canceled || !result.filePath) return null;
   fs.writeFileSync(result.filePath, content, 'utf8');
   return result.filePath;
+});
+
+// 列出目录内容：用于左侧文件树（root 默认为进程工作目录）
+ipcMain.handle('fs:listDir', async (_, dirPath) => {
+  try {
+    const root = process.cwd();
+    const target = dirPath && typeof dirPath === 'string'
+      ? (path.isAbsolute(dirPath) ? dirPath : path.join(root, dirPath))
+      : root;
+    const stat = fs.statSync(target);
+    if (!stat.isDirectory()) return { path: target, entries: [] };
+    const names = fs.readdirSync(target);
+    const entries = names.map((name) => {
+      const full = path.join(target, name);
+      let isDir = false;
+      try {
+        isDir = fs.statSync(full).isDirectory();
+      } catch (_) {}
+      return { name, path: full, isDir };
+    }).sort((a, b) => {
+      if (a.isDir && !b.isDir) return -1;
+      if (!a.isDir && b.isDir) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    return { path: target, entries };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
 });
 
 ipcMain.handle('markdown:render', async (_, markdown) => {

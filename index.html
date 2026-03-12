@@ -419,34 +419,61 @@
       }
       .file-list {
         list-style: none;
-        padding: 0;
+        padding: 4px 0;
         margin: 0;
-        font-size: 13px;
+        font-size: 12px;
         color: #e5e7eb;
       }
-      .file-list li {
-        padding: 4px 6px;
-        border-radius: 6px;
+      .file-list-item {
+        padding: 2px 6px;
+        border-radius: 4px;
         cursor: default;
         display: flex;
         align-items: center;
-        gap: 6px;
+        gap: 5px;
+        user-select: none;
       }
-      .file-list li span.dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 999px;
-        background: #22c55e;
+      .file-list-item:hover {
+        background: rgba(15, 23, 42, 0.9);
       }
-      .file-list li span.name {
-        flex: 1;
+      .file-indent {
+        width: 10px;
+        flex: 0 0 auto;
       }
-      .file-list li span.badge {
+      .file-toggle {
+        width: 16px;
+        height: 16px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        color: #6b7280;
         font-size: 10px;
-        padding: 1px 5px;
-        border-radius: 999px;
-        border: 1px solid rgba(148, 163, 184, 0.5);
+      }
+      .file-toggle.hidden {
+        visibility: hidden;
+      }
+      .file-icon {
+        width: 16px;
+        height: 16px;
+        flex: 0 0 auto;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
         color: #9ca3af;
+      }
+      .file-icon i {
+        font-size: 13px;
+      }
+      .file-list-item.is-dir .file-icon {
+        color: #eab308;
+      }
+      .file-name {
+        flex: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       /* Markdown 格式工具栏 */
       .md-toolbar {
@@ -909,23 +936,7 @@
           </span>
         </div>
         <div class="pane-body">
-          <ul class="file-list">
-            <li>
-              <span class="dot"></span>
-              <span class="name">README.md</span>
-              <span class="badge">Active</span>
-            </li>
-            <li>
-              <span class="dot" style="background:#f97316;"></span>
-              <span class="name">design/ai-flows.md</span>
-              <span class="badge">Plan</span>
-            </li>
-            <li>
-              <span class="dot" style="background:#22c55e;"></span>
-              <span class="name">notes/ideas.md</span>
-              <span class="badge">Ideas</span>
-            </li>
-          </ul>
+          <ul class="file-list" id="file-tree"></ul>
         </div>
       </div>
 
