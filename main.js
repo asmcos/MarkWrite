@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage, clipboard } = require('electron');
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
@@ -205,6 +205,103 @@ ipcMain.handle('file:saveAs', async (_, content) => {
   if (result.canceled || !result.filePath) return null;
   fs.writeFileSync(result.filePath, content, 'utf8');
   return result.filePath;
+});
+
+// 上传图片：弹出文件选择对话框，将图片复制到项目根目录下的 uploads 目录，并返回供 Markdown 使用的相对路径
+ipcMain.handle('image:upload', async () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  const result = await dialog.showOpenDialog(win, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  });
+  if (result.canceled || !result.filePaths.length) return null;
+  const src = result.filePaths[0];
+  try {
+    const stat = fs.statSync(src);
+    if (!stat.isFile()) return { error: '不是有效文件' };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+  const uploadsDir = path.join(ROOT, 'uploads');
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+  const ext = path.extname(src) || '';
+  const base = path.basename(src, ext) || 'image';
+  const rand = Math.random().toString(36).slice(2, 8);
+  let destName = `${base}-${rand}${ext}`;
+  let destPath = path.join(uploadsDir, destName);
+  let tries = 0;
+  while (fs.existsSync(destPath) && tries < 5) {
+    const r = Math.random().toString(36).slice(2, 8);
+    destName = `${base}-${r}${ext}`;
+    destPath = path.join(uploadsDir, destName);
+    tries += 1;
+  }
+  try {
+    fs.copyFileSync(src, destPath);
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+  // Web 访问路径：由内置 HTTP 服务器以 ROOT 为根提供静态文件
+  const webPath = `uploads/${destName}`;
+  return { ok: true, filePath: destPath, webPath };
+});
+
+// 从粘贴板数据保存图片：renderer 传入二进制数组和可选扩展名/原始文件名
+ipcMain.handle('image:pasteBinary', async (_event, payload) => {
+  try {
+    if (!payload || !payload.data) return { error: 'no image data' };
+    const data = payload.data;
+    const extInput = payload.ext || '';
+    const nameInput = payload.name || '';
+    const uploadsDir = path.join(ROOT, 'uploads');
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const fromNameExt = path.extname(nameInput || '') || '';
+    let ext = extInput || fromNameExt || '.png';
+    if (ext[0] !== '.') ext = `.${ext}`;
+    const base = (nameInput && path.basename(nameInput, fromNameExt)) || 'pasted-image';
+    const rand = Math.random().toString(36).slice(2, 8);
+    let destName = `${base}-${rand}${ext}`;
+    let destPath = path.join(uploadsDir, destName);
+    let tries = 0;
+    while (fs.existsSync(destPath) && tries < 5) {
+      const r = Math.random().toString(36).slice(2, 8);
+      destName = `${base}-${r}${ext}`;
+      destPath = path.join(uploadsDir, destName);
+      tries += 1;
+    }
+    const buf = Buffer.from(data);
+    fs.writeFileSync(destPath, buf);
+    const webPath = `uploads/${destName}`;
+    return { ok: true, filePath: destPath, webPath };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
+});
+
+// 直接从系统剪贴板读取图片（备用方案，防止 DOM 粘贴事件拿不到 image items）
+ipcMain.handle('image:fromClipboard', async () => {
+  try {
+    const img = clipboard.readImage();
+    if (!img || img.isEmpty()) return { error: 'clipboard has no image' };
+    const uploadsDir = path.join(ROOT, 'uploads');
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    const rand = Math.random().toString(36).slice(2, 8);
+    const destName = `clipboard-image-${rand}.png`;
+    const destPath = path.join(uploadsDir, destName);
+    const buf = img.toPNG();
+    fs.writeFileSync(destPath, buf);
+    const webPath = `uploads/${destName}`;
+    return { ok: true, filePath: destPath, webPath };
+  } catch (e) {
+    return { error: e && e.message ? e.message : String(e) };
+  }
 });
 
 // 列出目录内容：用于左侧文件树（root 默认为进程工作目录）

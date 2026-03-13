@@ -38,6 +38,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const btnOpen = document.getElementById('btn-open');
   const btnToggleExplorer = document.getElementById('btn-toggle-explorer');
   const btnExpandExplorer = document.getElementById('btn-expand-explorer');
+  const btnNew = document.getElementById('btn-new');
   const btnSave = document.getElementById('btn-save');
   const btnSaveAs = document.getElementById('btn-saveas');
   const previewToggle = document.getElementById('preview-toggle');
@@ -47,9 +48,6 @@ window.addEventListener('DOMContentLoaded', () => {
   const aiMessages = document.getElementById('ai-messages');
   const aiInput = document.getElementById('ai-input');
   const aiSend = document.getElementById('ai-send');
-  const aiModeChat = document.getElementById('ai-mode-chat');
-  const aiModeCmd = document.getElementById('ai-mode-cmd');
-
   let editor = null;
   let currentFilePath = null;
   // 若 AI 通过 markwrite_apply_content 回写，则这里会收到 apply-editor-content
@@ -103,8 +101,6 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   let aiMode = 'chat';
   /** 用户手动选择的模式，null 表示由系统根据输入自动判断 */
-  let manualAiMode = null;
-
   // ---- VSCode-like 布局：聊天宽度拖拽 + 文件侧栏收起/展开 ----
   const LAYOUT_CHAT_WIDTH_KEY = 'markwrite-layout-chat-width'; // number px
   const LAYOUT_EXPLORER_HIDDEN_KEY = 'markwrite-layout-explorer-hidden'; // '1' | '0'
@@ -184,6 +180,34 @@ window.addEventListener('DOMContentLoaded', () => {
       window.addEventListener('mouseup', onUp);
     });
   }
+
+  // 在编辑器里 Ctrl+V 粘贴图片：仅当焦点在 Monaco 时处理，通过主进程 clipboard 读图并存入 uploads
+  window.addEventListener('paste', async (e) => {
+    try {
+      if (!editor || !window.markwrite?.api?.uploadClipboardImage) return;
+      if (typeof editor.hasTextFocus === 'function' && !editor.hasTextFocus()) return;
+      e.preventDefault();
+      const res = await window.markwrite.api.uploadClipboardImage();
+      if (!res?.ok || !res.webPath) return;
+      const model = editor.getModel();
+      const sel = editor.getSelection();
+      if (!sel) return;
+      const range = {
+        startLineNumber: sel.startLineNumber,
+        startColumn: sel.startColumn,
+        endLineNumber: sel.endLineNumber,
+        endColumn: sel.endColumn,
+      };
+      const raw = model.getValueInRange(sel);
+      const defaultAlt = raw ? raw.replace(/\s+/g, ' ').trim() : '';
+      const alt = defaultAlt || '图片';
+      const url = res.webPath;
+      editor.executeEdits('paste-image', [{ range, text: '![' + alt + '](' + url + ')' }]);
+      editor.focus();
+    } catch (_) {
+      // 忽略粘贴图片过程中的错误，避免影响普通文本粘贴
+    }
+  }, true);
 
   // 文件树：简单目录浏览，root = 应用工作目录
   const FILE_TREE_KEY = 'markwrite-filetree-expanded'; // JSON: { [path]: boolean }
@@ -428,29 +452,35 @@ window.addEventListener('DOMContentLoaded', () => {
   function setupMdToolbar(ed) {
     const model = ed.getModel();
     const getSelection = () => ed.getSelection();
+    const toRange = (sel) => ({
+      startLineNumber: sel.startLineNumber,
+      startColumn: sel.startColumn,
+      endLineNumber: sel.endLineNumber,
+      endColumn: sel.endColumn,
+    });
     const getSelectedText = () => {
       const s = getSelection();
       return model.getValueInRange(s);
     };
     const replaceSelection = (text) => {
       const s = getSelection();
-      ed.executeEdits('md-toolbar', [{ range: s, text }]);
+      ed.executeEdits('md-toolbar', [{ range: toRange(s), text }]);
     };
     const wrapSelection = (before, after, cursorInside) => {
       const s = getSelection();
       const t = getSelectedText();
       const text = t ? before + t + after : before + after;
-      ed.executeEdits('md-toolbar', [{ range: s, text }]);
+      ed.executeEdits('md-toolbar', [{ range: toRange(s), text }]);
       if (cursorInside !== false) {
-        const p = s.getStartPosition();
-        const len = (t ? before.length + t.length : before.length);
+        const start = s.getStartPosition();
+        const end = s.getEndPosition();
         ed.setSelection({
-          startLineNumber: p.lineNumber,
-          startColumn: p.column + before.length,
-          endLineNumber: p.lineNumber + (t ? (t.split('\n').length - 1) : 0),
-          endColumn: p.column + len,
+          startLineNumber: start.lineNumber,
+          startColumn: start.column + before.length,
+          endLineNumber: end.lineNumber,
+          endColumn: end.column + before.length,
         });
-        ed.revealPositionInCenter({ lineNumber: p.lineNumber, column: p.column + before.length });
+        ed.revealPositionInCenter({ lineNumber: start.lineNumber, column: start.column + before.length });
       }
     };
     const getCurrentLine = () => {
@@ -458,12 +488,18 @@ window.addEventListener('DOMContentLoaded', () => {
       return model.getLineContent(p.lineNumber);
     };
     const insertAtLineStart = (prefix) => {
-      const p = getSelection().getStartPosition();
-      const line = model.getLineContent(p.lineNumber);
-      const stripped = line.replace(/^#+\s*/, '').trimStart();
-      const r = { startLineNumber: p.lineNumber, startColumn: 1, endLineNumber: p.lineNumber, endColumn: line.length + 1 };
-      ed.executeEdits('md-toolbar', [{ range: r, text: prefix + stripped }]);
-      ed.setSelection({ startLineNumber: p.lineNumber, startColumn: prefix.length + 1, endLineNumber: p.lineNumber, endColumn: prefix.length + stripped.length + 1 });
+      const s = getSelection();
+      const startLn = s.startLineNumber;
+      const endLn = s.endLineNumber;
+      let newText = '';
+      for (let i = startLn; i <= endLn; i++) {
+        const line = model.getLineContent(i);
+        const stripped = line.replace(/^#+\s*/, '').trimStart();
+        newText += (i > startLn ? '\n' : '') + prefix + stripped;
+      }
+      const r = { startLineNumber: startLn, startColumn: 1, endLineNumber: endLn, endColumn: model.getLineContent(endLn).length + 1 };
+      ed.executeEdits('md-toolbar', [{ range: r, text: newText }]);
+      ed.setSelection({ startLineNumber: startLn, startColumn: prefix.length + 1, endLineNumber: endLn, endColumn: prefix.length + (model.getLineContent(endLn).replace(/^#+\s*/, '').trimStart().length) + 1 });
     };
     const prefixLines = (getPrefixForLine) => {
       const s = getSelection();
@@ -474,7 +510,7 @@ window.addEventListener('DOMContentLoaded', () => {
         const prefix = typeof getPrefixForLine === 'function' ? getPrefixForLine(i - start + 1, i) : getPrefixForLine;
         text += (i > start ? '\n' : '') + prefix + model.getLineContent(i);
       }
-      ed.executeEdits('md-toolbar', [{ range: s, text }]);
+      ed.executeEdits('md-toolbar', [{ range: toRange(s), text }]);
     };
 
     const actions = {
@@ -487,22 +523,131 @@ window.addEventListener('DOMContentLoaded', () => {
       'md-link': () => {
         const raw = getSelectedText();
         const defaultText = raw ? raw.replace(/\s+/g, ' ').trim() : '';
-        const url = window.prompt('链接地址 (URL)', 'https://');
-        if (url == null) return;
-        const u = String(url).trim();
-        if (!u) return;
-        const linkText = defaultText || u;
-        replaceSelection('[' + linkText + '](' + u + ')');
+        const sel = getSelection();
+        const range = toRange(sel);
+        const overlay = document.createElement('div');
+        overlay.className = 'table-size-overlay';
+        const box = document.createElement('div');
+        box.className = 'table-size-box';
+        box.innerHTML = '<div class="table-size-title">插入链接 (Markdown)</div>';
+        const row1 = document.createElement('div');
+        row1.className = 'table-size-row';
+        row1.innerHTML = '<label>链接文字</label><input type="text" id="link-text" placeholder="显示文字" style="flex:1;min-width:0">';
+        const row2 = document.createElement('div');
+        row2.className = 'table-size-row';
+        row2.innerHTML = '<label>链接地址</label><input type="text" id="link-url" placeholder="https://" style="flex:1;min-width:0">';
+        const actions = document.createElement('div');
+        actions.className = 'table-size-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'apply-editor-btn apply-editor-btn-secondary';
+        cancelBtn.textContent = '取消';
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'apply-editor-btn apply-editor-btn-primary';
+        okBtn.textContent = '确定';
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        box.appendChild(row1);
+        box.appendChild(row2);
+        box.appendChild(actions);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        const textInput = box.querySelector('#link-text');
+        const urlInput = box.querySelector('#link-url');
+        textInput.value = defaultText || '';
+        urlInput.value = 'https://';
+        textInput.focus();
+        const close = (insert) => {
+          overlay.remove();
+          if (insert) {
+            ed.focus();
+            ed.setSelection(sel);
+            const linkText = String(textInput.value).trim() || urlInput.value.trim() || '链接';
+            const u = String(urlInput.value).trim();
+            if (u) {
+              ed.executeEdits('md-toolbar', [{ range, text: '[' + linkText + '](' + u + ')' }]);
+            }
+          }
+        };
+        cancelBtn.addEventListener('click', () => close(false));
+        okBtn.addEventListener('click', () => close(true));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+        urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') close(true); });
+        textInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); urlInput.focus(); } });
       },
       'md-image': () => {
         const raw = getSelectedText();
         const defaultAlt = raw ? raw.replace(/\s+/g, ' ').trim() : '';
-        const url = window.prompt('图片地址 (URL)', 'https://');
-        if (url == null) return;
-        const u = String(url).trim();
-        if (!u) return;
+        const sel = getSelection();
+        const range = toRange(sel);
+        const overlay = document.createElement('div');
+        overlay.className = 'table-size-overlay';
+        const box = document.createElement('div');
+        box.className = 'table-size-box';
+        box.innerHTML = '<div class="table-size-title">插入图片 (Markdown)</div>';
+        const row1 = document.createElement('div');
+        row1.className = 'table-size-row';
+        row1.innerHTML = '<label>替代文字</label><input type="text" id="img-alt" placeholder="图片描述" style="flex:1;min-width:0">';
+        const row2 = document.createElement('div');
+        row2.className = 'table-size-row';
+        row2.innerHTML = '<label>图片地址</label><input type="text" id="img-url" placeholder="https://" style="flex:1;min-width:0">';
+        const actions = document.createElement('div');
+        actions.className = 'table-size-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'apply-editor-btn apply-editor-btn-secondary';
+        cancelBtn.textContent = '取消';
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'apply-editor-btn apply-editor-btn-primary';
+        okBtn.textContent = '确定';
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        box.appendChild(row1);
+        box.appendChild(row2);
+        box.appendChild(actions);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        const altInput = box.querySelector('#img-alt');
+        const urlInput = box.querySelector('#img-url');
+        altInput.value = defaultAlt || '图片';
+        urlInput.value = 'https://';
+        altInput.focus();
+        const close = (insert) => {
+          overlay.remove();
+          if (insert) {
+            ed.focus();
+            ed.setSelection(sel);
+            const alt = String(altInput.value).trim() || '图片';
+            const u = String(urlInput.value).trim();
+            if (u) {
+              ed.executeEdits('md-toolbar', [{ range, text: '![' + alt + '](' + u + ')' }]);
+            }
+          }
+        };
+        cancelBtn.addEventListener('click', () => close(false));
+        okBtn.addEventListener('click', () => close(true));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+        urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') close(true); });
+        altInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); urlInput.focus(); } });
+      },
+      'md-upload-image': async () => {
+        if (!window.markwrite || !window.markwrite.api || !window.markwrite.api.uploadImage) {
+          console.warn('image upload api not available');
+          return;
+        }
+        const res = await window.markwrite.api.uploadImage();
+        if (!res || !res.ok || !res.webPath) return;
+        const raw = getSelectedText();
+        const defaultAlt = raw ? raw.replace(/\s+/g, ' ').trim() : '';
+        const sel = getSelection();
+        const range = toRange(sel);
         const alt = defaultAlt || '图片';
-        replaceSelection('![' + alt + '](' + u + ')');
+        const url = res.webPath;
+        ed.focus();
+        ed.setSelection(sel);
+        ed.executeEdits('md-toolbar', [{ range, text: '![' + alt + '](' + url + ')' }]);
       },
       'md-ul': () => prefixLines('- '),
       'md-ol': () => prefixLines((n) => n + '. '),
@@ -511,50 +656,127 @@ window.addEventListener('DOMContentLoaded', () => {
       'md-fence': () => {
         const s = getSelection();
         const t = getSelectedText();
+        const range = toRange(s);
         const hasSelection = t && t.trim().length > 0;
-        if (hasSelection) {
-          const lines = t.split('\n');
-          const lang = window.prompt('代码语言（可选，直接确定则留空）', '');
-          const langPart = lang != null && String(lang).trim() ? String(lang).trim() + '\n' : '';
-          replaceSelection('```' + langPart + t + '\n```');
-        } else {
-          const lang = window.prompt('代码语言（可选，直接确定则留空）', 'javascript');
-          const langPart = lang != null && String(lang).trim() ? String(lang).trim() + '\n' : '';
-          const insert = '```' + langPart + '\n\n```';
-          ed.executeEdits('md-toolbar', [{ range: s, text: insert }]);
-          const p = s.getStartPosition();
-          const cursorCol = 4 + (langPart ? langPart.length : 0) + 1;
-          ed.setSelection({ startLineNumber: p.lineNumber, startColumn: cursorCol, endLineNumber: p.lineNumber, endColumn: cursorCol });
-          ed.revealPositionInCenter({ lineNumber: p.lineNumber, column: cursorCol });
-        }
+        const overlay = document.createElement('div');
+        overlay.className = 'table-size-overlay';
+        const box = document.createElement('div');
+        box.className = 'table-size-box';
+        box.style.minWidth = '280px';
+        box.innerHTML = '<div class="table-size-title">插入代码块 (Markdown)</div>';
+        const row = document.createElement('div');
+        row.className = 'table-size-row';
+        row.innerHTML = '<label>代码语言</label><input type="text" id="fence-lang" placeholder="可选，如 js / python / bash" style="flex:1;min-width:0">';
+        box.appendChild(row);
+        const actions = document.createElement('div');
+        actions.className = 'table-size-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'apply-editor-btn apply-editor-btn-secondary';
+        cancelBtn.textContent = '取消';
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'apply-editor-btn apply-editor-btn-primary';
+        okBtn.textContent = '确定';
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        box.appendChild(actions);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        const langInput = box.querySelector('#fence-lang');
+        langInput.value = hasSelection ? '' : 'javascript';
+        langInput.focus();
+        const close = (doInsert) => {
+          overlay.remove();
+          if (!doInsert) return;
+          const langRaw = String(langInput.value).trim();
+          const langPart = langRaw ? langRaw + '\n' : '';
+          ed.focus();
+          ed.setSelection(s);
+          if (hasSelection) {
+            const content = t.endsWith('\n') ? t : t + '\n';
+            ed.executeEdits('md-toolbar', [{ range, text: '```' + langPart + content + '```\n' }]);
+          } else {
+            const insert = '```' + langPart + '\n\n```\n';
+            ed.executeEdits('md-toolbar', [{ range, text: insert }]);
+            const startLine = s.startLineNumber;
+            ed.setSelection({ startLineNumber: startLine + 1, startColumn: 1, endLineNumber: startLine + 1, endColumn: 1 });
+            ed.revealPositionInCenter({ lineNumber: startLine + 1, column: 1 });
+          }
+        };
+        cancelBtn.addEventListener('click', () => close(false));
+        okBtn.addEventListener('click', () => close(true));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
+        langInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') close(true); });
       },
       'md-hr': () => replaceSelection('\n\n---\n\n'),
       'md-table': () => {
-        const raw = window.prompt('表格行数、列数（如 3,3），直接确定则插入 3×3', '3,3');
-        let r = 3, c = 3;
-        if (raw != null && raw.trim()) {
-          const parts = raw.trim().split(/[,x×，\s]+/);
-          if (parts.length >= 1) r = parseInt(parts[0], 10) || 3;
-          if (parts.length >= 2) c = parseInt(parts[1], 10) || 3;
-        }
-        r = Math.max(1, Math.min(r, 20));
-        c = Math.max(1, Math.min(c, 10));
-        const cell = '   ';
-        const headerRow = '|' + Array(c).fill(cell).join('|') + '|\n';
-        const sepRow = '|' + Array(c).fill(' --- ').join('|') + '|\n';
-        const bodyRows = Array(Math.max(0, r - 1)).fill(0).map(() => '|' + Array(c).fill(cell).join('|') + '|\n').join('');
-        const table = '\n' + headerRow + sepRow + bodyRows;
-        const s = getSelection();
-        ed.executeEdits('md-toolbar', [{ range: s, text: table }]);
-        const p = s.getStartPosition();
-        ed.setSelection({ startLineNumber: p.lineNumber + 1, startColumn: 2, endLineNumber: p.lineNumber + 1, endColumn: 2 });
-        ed.revealPositionInCenter({ lineNumber: p.lineNumber + 1, column: 2 });
+        const sel = getSelection();
+        const range = toRange(sel);
+        const overlay = document.createElement('div');
+        overlay.className = 'table-size-overlay';
+        const box = document.createElement('div');
+        box.className = 'table-size-box';
+        box.innerHTML = '<div class="table-size-title">插入表格</div>';
+        const row1 = document.createElement('div');
+        row1.className = 'table-size-row';
+        row1.innerHTML = '<label>行数</label><input type="number" id="table-rows" min="1" max="20" value="3">';
+        const row2 = document.createElement('div');
+        row2.className = 'table-size-row';
+        row2.innerHTML = '<label>列数</label><input type="number" id="table-cols" min="1" max="10" value="3">';
+        const actions = document.createElement('div');
+        actions.className = 'table-size-actions';
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'apply-editor-btn apply-editor-btn-secondary';
+        cancelBtn.textContent = '取消';
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'apply-editor-btn apply-editor-btn-primary';
+        okBtn.textContent = '确定';
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        box.appendChild(row1);
+        box.appendChild(row2);
+        box.appendChild(actions);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        const close = (insert) => {
+          const rowsInput = box.querySelector('#table-rows');
+          const colsInput = box.querySelector('#table-cols');
+          let r = 3, c = 3;
+          if (rowsInput) r = Math.max(1, Math.min(20, parseInt(rowsInput.value, 10) || 3));
+          if (colsInput) c = Math.max(1, Math.min(10, parseInt(colsInput.value, 10) || 3));
+          overlay.remove();
+          if (!insert) return;
+          const cell = '   ';
+          const headerRow = '|' + Array(c).fill(cell).join('|') + '|\n';
+          const sepRow = '|' + Array(c).fill(' --- ').join('|') + '|\n';
+          const bodyRows = Array(Math.max(0, r - 1)).fill(0).map(() => '|' + Array(c).fill(cell).join('|') + '|\n').join('');
+          const table = '\n' + headerRow + sepRow + bodyRows;
+          ed.focus();
+          ed.setSelection(sel);
+          ed.executeEdits('md-toolbar', [{ range, text: table }]);
+          const p = sel.getStartPosition();
+          ed.setSelection({ startLineNumber: p.lineNumber + 1, startColumn: 2, endLineNumber: p.lineNumber + 1, endColumn: 2 });
+          ed.revealPositionInCenter({ lineNumber: p.lineNumber + 1, column: 2 });
+        };
+        okBtn.addEventListener('click', () => close(true));
+        cancelBtn.addEventListener('click', () => close(false));
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
       },
     };
 
     Object.keys(actions).forEach(id => {
       const btn = document.getElementById(id);
-      if (btn) btn.addEventListener('click', () => { if (ed) actions[id](); });
+      if (!btn) return;
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        ed.focus();
+      });
+      btn.addEventListener('click', () => {
+        if (ed) actions[id]();
+      });
     });
   }
 
@@ -564,6 +786,15 @@ window.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('monaco-ready', initMonaco);
   }
 
+  if (btnNew) {
+    btnNew.addEventListener('click', () => {
+      if (editor) {
+        editor.setValue('');
+        setFilename(null);
+        editor.focus();
+      }
+    });
+  }
   if (btnOpen && window.markwrite && window.markwrite.api) {
     btnOpen.addEventListener('click', async () => {
       const result = await window.markwrite.api.openFile();
@@ -610,9 +841,26 @@ window.addEventListener('DOMContentLoaded', () => {
     if (!aiMessages) return;
     const div = document.createElement('div');
     div.className = `ai-message ${role}`;
-    div.textContent = content;
-    aiMessages.appendChild(div);
-    aiMessages.scrollTop = aiMessages.scrollHeight;
+    if (role === 'assistant') {
+      div.textContent = content;
+      aiMessages.appendChild(div);
+      aiMessages.scrollTop = aiMessages.scrollHeight;
+      (async () => {
+        if (!window.markwrite || !window.markwrite.api || typeof window.markwrite.api.renderMarkdown !== 'function') return;
+        try {
+          const html = await window.markwrite.api.renderMarkdown(content || '');
+          if (div.parentNode) {
+            div.classList.add('ai-message-rendered');
+            div.innerHTML = html;
+            aiMessages.scrollTop = aiMessages.scrollHeight;
+          }
+        } catch (_) {}
+      })();
+    } else {
+      div.textContent = content;
+      aiMessages.appendChild(div);
+      aiMessages.scrollTop = aiMessages.scrollHeight;
+    }
   }
 
   const aiStatusText = document.getElementById('ai-status-text');
@@ -746,17 +994,6 @@ window.addEventListener('DOMContentLoaded', () => {
       if (t.includes(k.toLowerCase())) return 'cmd';
     }
     return 'chat';
-  }
-
-  if (aiModeChat && aiModeCmd) {
-    function setAiMode(mode, fromUser) {
-      aiMode = mode;
-      if (fromUser) manualAiMode = mode;
-      aiModeChat.classList.toggle('active', mode === 'chat');
-      aiModeCmd.classList.toggle('active', mode === 'cmd');
-    }
-    aiModeChat.addEventListener('click', () => setAiMode('chat', true));
-    aiModeCmd.addEventListener('click', () => setAiMode('cmd', true));
   }
 
   if (aiMessages) {
@@ -932,15 +1169,7 @@ window.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    if (manualAiMode !== null) {
-      aiMode = manualAiMode;
-    } else {
-      aiMode = suggestAiMode(msg);
-      if (aiModeChat && aiModeCmd) {
-        aiModeChat.classList.toggle('active', aiMode === 'chat');
-        aiModeCmd.classList.toggle('active', aiMode === 'cmd');
-      }
-    }
+    aiMode = suggestAiMode(msg);
 
     appendMessage('user', msg);
     aiInput.value = '';
@@ -1014,7 +1243,17 @@ window.addEventListener('DOMContentLoaded', () => {
         clearInterval(loadingTimer);
         const hasError = result && result.error;
         const text = hasError ? result.error : (result && result.text ? result.text : '（无回复）');
-        contentDiv.textContent = text;
+        if (hasError) {
+          contentDiv.textContent = text;
+        } else {
+          try {
+            const html = await window.markwrite.api.renderMarkdown(text || '');
+            contentDiv.classList.add('ai-message-rendered');
+            contentDiv.innerHTML = html;
+          } catch (_) {
+            contentDiv.textContent = text;
+          }
+        }
 
         if (useCmd && !hasError && result && result.fileModified && editor && currentFilePath) {
           try {
