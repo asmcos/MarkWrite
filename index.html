@@ -178,9 +178,11 @@
         paths: { vs: '/node_modules/monaco-editor/min/vs' },
         'vs/nls': { availableLanguages: {} }
       });
+      // 使用 Monaco 的 AMD 版本时，worker 也需要走 min 目录下的 AMD 入口，
+      // 不能直接指向 ESM 的 editor.worker.js（否则会出现 \"Cannot use import statement outside a module\" 错误）。
       window.MonacoEnvironment = {
-        getWorkerUrl: function(workerId, label) {
-          return '/node_modules/monaco-editor/esm/vs/editor/editor.worker.js';
+        getWorkerUrl: function (workerId, label) {
+          return '/node_modules/monaco-editor/min/vs/base/worker/workerMain.js';
         }
       };
       require(['vs/editor/editor.main'], function() {

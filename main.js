@@ -372,13 +372,37 @@ function setupWorkspaceWatcher() {
     }
     const root = workspaceRoot || DEFAULT_WORKSPACE;
     if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) return;
+    // 监听当前工作区及其子目录；使用轮询方式，行为与 test.js 中一致
     workspaceWatcher = chokidar.watch(root, {
+      persistent: true,
       ignoreInitial: true,
       depth: Infinity,
+      usePolling: true,   // 与 test.js 一样，强制轮询，兼容性更好
+      interval: 800,
+      alwaysStat: true,
     });
-    workspaceWatcher.on('all', () => {
-      notifyWorkspaceChanged();
-    });
+    workspaceWatcher
+      .on('ready', () => {
+        // watcher 就绪
+      })
+      .on('add', () => {
+        notifyWorkspaceChanged();
+      })
+      .on('change', () => {
+        notifyWorkspaceChanged();
+      })
+      .on('addDir', () => {
+        notifyWorkspaceChanged();
+      })
+      .on('unlink', () => {
+        notifyWorkspaceChanged();
+      })
+      .on('unlinkDir', () => {
+        notifyWorkspaceChanged();
+      })
+      .on('error', () => {
+        // 监听错误时静默失败，避免打断应用
+      });
   } catch (_) {
     workspaceWatcher = null;
   }
@@ -392,6 +416,7 @@ function loadWorkspaceRoot() {
       // 若记录的是应用自身目录（旧版本遗留），则忽略，退回默认工作区
       if (p && fs.existsSync(p) && fs.statSync(p).isDirectory() && !p.startsWith(ROOT)) {
         workspaceRoot = p;
+        setupWorkspaceWatcher();
         return;
       }
     }
