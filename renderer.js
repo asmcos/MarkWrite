@@ -240,9 +240,11 @@ window.addEventListener('DOMContentLoaded', () => {
     const toggle = document.createElement('span');
     toggle.className = 'file-toggle';
     if (!entry.isDir) toggle.classList.add('hidden');
-    toggle.textContent = entry.isDir
-      ? (fileTreeState[entry.path] ? '▾' : '▸')
-      : '';
+    if (entry.isDir) {
+      toggle.innerHTML = fileTreeState[entry.path]
+        ? '<i class="bi bi-chevron-down"></i>'
+        : '<i class="bi bi-chevron-right"></i>';
+    }
     li.appendChild(toggle);
 
     const icon = document.createElement('span');
@@ -273,7 +275,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (entry.isDir) {
       li.addEventListener('click', async (e) => {
         // 点击 toggle 或行都展开/收起
-        if (e.target === toggle || e.target === name || e.target === icon || e.target === indent) {
+        if (toggle.contains(e.target) || e.target === name || e.target === icon || e.target === indent) {
           const cur = !!fileTreeState[entry.path];
           fileTreeState[entry.path] = !cur;
           saveFileTreeState();
