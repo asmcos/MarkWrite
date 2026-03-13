@@ -306,6 +306,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
     if (entry.isDir) {
       li.addEventListener('click', async (e) => {
+        if (li.classList.contains('is-renaming')) return;
         // 点击 toggle 或行都展开/收起
         if (toggle.contains(e.target) || e.target === name || e.target === icon || e.target === indent) {
           const cur = !!fileTreeState[entry.path];
@@ -316,7 +317,9 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       });
     } else {
-      li.addEventListener('click', async () => {
+      li.addEventListener('click', async (e) => {
+        if (li.classList.contains('is-renaming')) return;
+        if (e.target && e.target.tagName === 'INPUT') return;
         if (!window.markwrite || !window.markwrite.api || !editor) return;
         const res = await window.markwrite.api.fileRead(entry.path);
         if (res && typeof res.content === 'string') {
