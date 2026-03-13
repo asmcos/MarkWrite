@@ -21,6 +21,7 @@
     "@langchain/openai": "^1.0.0",
     "ai": "^6.0.116",
     "bootstrap-icons": "^1.13.1",
+    "chokidar": "^3.6.0",
     "dotenv": "^17.3.1",
     "highlight.js": "^11.9.0",
     "markdown-it": "^14.0.0",
@@ -30,9 +31,9 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "electron": "^40.6.1",
-    "openagent": "git+https://github.com/asmcos/openagent.git",
+    "@openagent/app": "file:./node_modules/openagent/packages/app",
     "@openagent/core": "file:./node_modules/openagent/packages/core",
-    "@openagent/app": "file:./node_modules/openagent/packages/app"
+    "electron": "^40.6.1",
+    "openagent": "git+https://github.com/asmcos/openagent.git"
   }
 }

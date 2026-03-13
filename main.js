@@ -3,6 +3,7 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
+const chokidar = require('chokidar');
 
 // 让 Linux 程序坞/任务栏用 .desktop 的图标（需与 StartupWMClass 一致）
 app.setName('MarkWrite');
@@ -13,6 +14,8 @@ const ROOT = __dirname;
 const DEFAULT_WORKSPACE = path.join(os.homedir(), 'markwrite-docs');
 const WORKSPACE_ROOT_FILE = path.join(os.homedir(), '.config', 'markwrite', 'workspace-root');
 let workspaceRoot = DEFAULT_WORKSPACE;
+let workspaceWatcher = null;
+let workspaceChangeTimer = null;
 let mainWindow = null;
 
 const { render: renderMarkdown } = require('./md-renderer.js');
@@ -176,6 +179,41 @@ ipcMain.handle('file:read', async (_, filePath) => {
   }
 });
 
+ipcMain.handle('file:rename', async (_, oldPath, newName) => {
+  if (!oldPath || typeof oldPath !== 'string' || !newName || typeof newName !== 'string') {
+    return { ok: false, message: '参数无效' };
+  }
+  try {
+    const dir = path.dirname(oldPath);
+    const target = path.join(dir, newName.trim());
+    if (target === oldPath) return { ok: true, oldPath, newPath: target };
+    fs.renameSync(oldPath, target);
+    return { ok: true, oldPath, newPath: target };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+ipcMain.handle('file:delete', async (_, targetPath) => {
+  if (!targetPath || typeof targetPath !== 'string') {
+    return { ok: false, message: '参数无效' };
+  }
+  try {
+    if (!fs.existsSync(targetPath)) {
+      return { ok: true, deleted: false };
+    }
+    const stat = fs.statSync(targetPath);
+    if (stat.isDirectory()) {
+      fs.rmSync(targetPath, { recursive: true, force: true });
+    } else {
+      fs.unlinkSync(targetPath);
+    }
+    return { ok: true, deleted: true };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
 ipcMain.handle('file:save', async (_, filePath, content) => {
   if (!filePath) return false;
   fs.writeFileSync(filePath, content, 'utf8');
@@ -315,6 +353,37 @@ function ensureDefaultWorkspace() {
   } catch (_) {}
 }
 
+function notifyWorkspaceChanged() {
+  if (workspaceChangeTimer) clearTimeout(workspaceChangeTimer);
+  workspaceChangeTimer = setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        mainWindow.webContents.send('workspace:changed');
+      } catch (_) {}
+    }
+  }, 400);
+}
+
+function setupWorkspaceWatcher() {
+  try {
+    if (workspaceWatcher) {
+      workspaceWatcher.close();
+      workspaceWatcher = null;
+    }
+    const root = workspaceRoot || DEFAULT_WORKSPACE;
+    if (!root || !fs.existsSync(root) || !fs.statSync(root).isDirectory()) return;
+    workspaceWatcher = chokidar.watch(root, {
+      ignoreInitial: true,
+      depth: Infinity,
+    });
+    workspaceWatcher.on('all', () => {
+      notifyWorkspaceChanged();
+    });
+  } catch (_) {
+    workspaceWatcher = null;
+  }
+}
+
 function loadWorkspaceRoot() {
   ensureDefaultWorkspace();
   try {
@@ -328,6 +397,7 @@ function loadWorkspaceRoot() {
     }
   } catch (_) {}
   workspaceRoot = DEFAULT_WORKSPACE;
+  setupWorkspaceWatcher();
 }
 
 function setWorkspaceRoot(dirPath) {
@@ -344,6 +414,7 @@ function setWorkspaceRoot(dirPath) {
   } catch (_) {
     workspaceRoot = DEFAULT_WORKSPACE;
   }
+  setupWorkspaceWatcher();
 }
 
 ipcMain.handle('app:getDefaultWorkspace', async () => {

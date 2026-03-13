@@ -1,8 +1,12 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let applyEditorContentCallback = null;
+let workspaceChangedCallback = null;
 ipcRenderer.on('apply-editor-content', (_, content) => {
   if (typeof applyEditorContentCallback === 'function') applyEditorContentCallback(content);
+});
+ipcRenderer.on('workspace:changed', () => {
+  if (typeof workspaceChangedCallback === 'function') workspaceChangedCallback();
 });
 
 contextBridge.exposeInMainWorld('markwrite', {
@@ -12,8 +16,13 @@ contextBridge.exposeInMainWorld('markwrite', {
     onApplyEditorContent: (callback) => {
       applyEditorContentCallback = typeof callback === 'function' ? callback : null;
     },
+    onWorkspaceChanged: (callback) => {
+      workspaceChangedCallback = typeof callback === 'function' ? callback : null;
+    },
     openFile: () => ipcRenderer.invoke('file:open'),
     fileRead: (filePath) => ipcRenderer.invoke('file:read', filePath),
+    renameFile: (oldPath, newName) => ipcRenderer.invoke('file:rename', oldPath, newName),
+    deleteFile: (targetPath) => ipcRenderer.invoke('file:delete', targetPath),
     saveFile: (filePath, content) => ipcRenderer.invoke('file:save', filePath, content),
     saveTo: (targetPath, content) => ipcRenderer.invoke('file:saveTo', targetPath, content),
     saveAs: (content) => ipcRenderer.invoke('file:saveAs', content),

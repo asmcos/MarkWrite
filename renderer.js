@@ -38,6 +38,7 @@ window.addEventListener('DOMContentLoaded', () => {
   const btnOpen = document.getElementById('btn-open');
   const btnToggleExplorer = document.getElementById('btn-toggle-explorer');
   const btnExpandExplorer = document.getElementById('btn-expand-explorer');
+  const btnRefreshFiles = document.getElementById("btn-refresh-files");
   const btnNew = document.getElementById('btn-new');
   const btnSave = document.getElementById('btn-save');
   const btnSaveAs = document.getElementById('btn-saveas');
@@ -148,6 +149,9 @@ window.addEventListener('DOMContentLoaded', () => {
     try { localStorage.setItem(LAYOUT_EXPLORER_HIDDEN_KEY, '0'); } catch (_) {}
     applyLayoutState();
   });
+  if (btnRefreshFiles && window.markwrite && window.markwrite.api) {
+    btnRefreshFiles.addEventListener("click", () => { void loadFileTree(); });
+  }
 
   // 右侧聊天面板宽度：拖拽分隔线调整（像 VSCode）
   if (splitterChat) {
@@ -322,6 +326,144 @@ window.addEventListener('DOMContentLoaded', () => {
         }
       });
     }
+
+    // 右键菜单：重命名 / 删除
+    li.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!window.markwrite || !window.markwrite.api) return;
+      const existing = document.getElementById('file-tree-context-menu');
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      const menu = document.createElement('div');
+      menu.id = 'file-tree-context-menu';
+      menu.style.position = 'fixed';
+      menu.style.zIndex = '9999';
+      menu.style.minWidth = '120px';
+      menu.style.background = '#020617';
+      menu.style.border = '1px solid rgba(148,163,184,0.5)';
+      menu.style.borderRadius = '6px';
+      menu.style.boxShadow = '0 10px 30px rgba(0,0,0,0.6)';
+      menu.style.fontSize = '12px';
+      menu.style.color = '#e5e7eb';
+      menu.style.padding = '4px 0';
+
+      const makeItem = (label) => {
+        const item = document.createElement('div');
+        item.textContent = label;
+        item.style.padding = '4px 10px';
+        item.style.cursor = 'pointer';
+        item.addEventListener('mouseenter', () => { item.style.background = 'rgba(51,65,85,0.9)'; });
+        item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+        return item;
+      };
+
+      const doClose = () => {
+        if (menu.parentNode) menu.parentNode.removeChild(menu);
+        window.removeEventListener('click', onWindowClick, true);
+        window.removeEventListener('contextmenu', onWindowClick, true);
+      };
+      const onWindowClick = (evt) => {
+        if (evt.target === menu || menu.contains(evt.target)) return;
+        doClose();
+      };
+
+      const renameItem = makeItem('重命名');
+      renameItem.addEventListener('click', () => {
+        doClose();
+        // 行内重命名：用一个小输入框替换名称
+        const currentName = entry.name || '';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = currentName;
+        input.style.width = '100%';
+        input.style.border = '1px solid rgba(148,163,184,0.6)';
+        input.style.borderRadius = '4px';
+        input.style.background = 'rgba(15,23,42,0.95)';
+        input.style.color = '#e5e7eb';
+        input.style.fontSize = '12px';
+        input.style.padding = '1px 4px';
+        input.style.boxSizing = 'border-box';
+
+        li.classList.add('is-renaming');
+        const oldText = name.textContent;
+        name.textContent = '';
+        name.appendChild(input);
+        input.focus();
+        input.select();
+
+        const finish = async (commit) => {
+          li.classList.remove('is-renaming');
+          const newName = String(input.value || '').trim();
+          if (name.contains(input)) {
+            name.removeChild(input);
+          }
+          name.textContent = entry.name; // 先恢复旧名，成功后刷新树
+          if (!commit || !newName || newName === currentName) return;
+          try {
+            const res = await window.markwrite.api.renameFile(entry.path, newName);
+            if (res && res.ok && res.newPath) {
+              if (currentFilePath === entry.path) {
+                currentFilePath = res.newPath;
+                setFilename(res.newPath);
+              }
+              await loadFileTree();
+              markFileSelected(res.newPath);
+            } else if (res && res.message) {
+              window.alert(`重命名失败：${res.message}`);
+            }
+          } catch (_) {
+            window.alert('重命名失败');
+          }
+        };
+
+        input.addEventListener('keydown', (ev) => {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            finish(true);
+          } else if (ev.key === 'Escape') {
+            ev.preventDefault();
+            finish(false);
+          }
+        });
+        input.addEventListener('blur', () => finish(true));
+      });
+
+      const deleteItem = makeItem('删除');
+      deleteItem.style.color = '#fecaca';
+      deleteItem.addEventListener('click', async () => {
+        doClose();
+        const isDir = !!entry.isDir;
+        const ok = window.confirm(isDir ? `确定删除目录及其所有内容？\n${entry.path}` : `确定删除文件？\n${entry.path}`);
+        if (!ok) return;
+        try {
+          const res = await window.markwrite.api.deleteFile(entry.path);
+          if (res && res.ok) {
+            if (currentFilePath === entry.path) {
+              currentFilePath = null;
+              if (editor) editor.setValue('');
+              setFilename(null);
+            }
+            await loadFileTree();
+          } else if (res && res.message) {
+            window.alert(`删除失败：${res.message}`);
+          }
+        } catch (err) {
+          window.alert('删除失败');
+        }
+      });
+
+      menu.appendChild(renameItem);
+      menu.appendChild(deleteItem);
+
+      const x = e.clientX;
+      const y = e.clientY;
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+      document.body.appendChild(menu);
+      window.addEventListener('click', onWindowClick, true);
+      window.addEventListener('contextmenu', onWindowClick, true);
+    });
+
     return li;
   }
 
@@ -379,6 +521,15 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     await loadFileTree();
   })();
+
+  // 监听工作区目录变更：有变化时自动刷新左侧文件树
+  if (window.markwrite?.api?.onWorkspaceChanged) {
+    try {
+      window.markwrite.api.onWorkspaceChanged(() => {
+        void loadFileTree();
+      });
+    } catch (_) {}
+  }
 
   // 预览开关：默认打开；点击「预览」在显示/隐藏之间切换
   const PREVIEW_KEY = 'markwrite-preview-open';
