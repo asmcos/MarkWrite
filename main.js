@@ -10,6 +10,9 @@ app.setName('MarkWrite');
 const PORT_BASE = 3131;
 const PORT_LAST = 3140;
 const ROOT = __dirname;
+const DEFAULT_WORKSPACE = path.join(os.homedir(), 'markwrite-docs');
+const WORKSPACE_ROOT_FILE = path.join(os.homedir(), '.config', 'markwrite', 'workspace-root');
+let workspaceRoot = DEFAULT_WORKSPACE;
 let mainWindow = null;
 
 const { render: renderMarkdown } = require('./md-renderer.js');
@@ -179,13 +182,14 @@ ipcMain.handle('file:save', async (_, filePath, content) => {
   return true;
 });
 
-// 保存到指定路径：若传入相对路径，则以当前进程工作目录为基准（通常为 MarkWrite 项目目录）
+// 保存到指定路径：相对路径以当前工作区根目录为基准（默认 ~/markwrite-docs 或左侧工作区）
 ipcMain.handle('file:saveTo', async (_, targetPath, content) => {
   if (!targetPath || typeof targetPath !== 'string') return null;
   const p = targetPath.trim();
   if (!p) return null;
   try {
-    const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+    const root = workspaceRoot || DEFAULT_WORKSPACE;
+    const abs = path.isAbsolute(p) ? p : path.join(root, p);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, content || '', 'utf8');
     return abs;
@@ -304,12 +308,65 @@ ipcMain.handle('image:fromClipboard', async () => {
   }
 });
 
-// 列出目录内容：用于左侧文件树（root 默认为进程工作目录）
+// 默认/当前工作区：~/markwrite-docs，或由前端设置的工作区
+function ensureDefaultWorkspace() {
+  try {
+    fs.mkdirSync(DEFAULT_WORKSPACE, { recursive: true });
+  } catch (_) {}
+}
+
+function loadWorkspaceRoot() {
+  ensureDefaultWorkspace();
+  try {
+    if (fs.existsSync(WORKSPACE_ROOT_FILE)) {
+      const p = (fs.readFileSync(WORKSPACE_ROOT_FILE, 'utf8') || '').trim();
+      // 若记录的是应用自身目录（旧版本遗留），则忽略，退回默认工作区
+      if (p && fs.existsSync(p) && fs.statSync(p).isDirectory() && !p.startsWith(ROOT)) {
+        workspaceRoot = p;
+        return;
+      }
+    }
+  } catch (_) {}
+  workspaceRoot = DEFAULT_WORKSPACE;
+}
+
+function setWorkspaceRoot(dirPath) {
+  ensureDefaultWorkspace();
+  const p = (dirPath || '').trim();
+  if (!p) return;
+  try {
+    const stat = fs.statSync(p);
+    if (!stat.isDirectory()) return;
+    workspaceRoot = p;
+    const cfgDir = path.dirname(WORKSPACE_ROOT_FILE);
+    fs.mkdirSync(cfgDir, { recursive: true });
+    fs.writeFileSync(WORKSPACE_ROOT_FILE, workspaceRoot, 'utf8');
+  } catch (_) {
+    workspaceRoot = DEFAULT_WORKSPACE;
+  }
+}
+
+ipcMain.handle('app:getDefaultWorkspace', async () => {
+  loadWorkspaceRoot();
+  return { path: workspaceRoot || DEFAULT_WORKSPACE };
+});
+
+ipcMain.handle('app:setWorkspaceRoot', async (_, dirPath) => {
+  if (dirPath && typeof dirPath === 'string') {
+    try {
+      setWorkspaceRoot(dirPath);
+    } catch (_) {}
+  }
+  return { path: workspaceRoot || DEFAULT_WORKSPACE };
+});
+
+// 列出目录内容：用于左侧文件树（无 dirPath 时使用当前工作区根目录）
 ipcMain.handle('fs:listDir', async (_, dirPath) => {
   try {
-    const root = process.cwd();
-    const target = dirPath && typeof dirPath === 'string'
-      ? (path.isAbsolute(dirPath) ? dirPath : path.join(root, dirPath))
+    loadWorkspaceRoot();
+    const root = workspaceRoot || DEFAULT_WORKSPACE;
+    const target = dirPath && typeof dirPath === 'string' && dirPath.trim() !== ''
+      ? (path.isAbsolute(dirPath) ? dirPath : path.join(root, dirPath.trim()))
       : root;
     const stat = fs.statSync(target);
     if (!stat.isDirectory()) return { path: target, entries: [] };

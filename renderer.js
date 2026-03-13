@@ -236,6 +236,10 @@ window.addEventListener('DOMContentLoaded', () => {
       if (fileRootPath) localStorage.setItem(FILE_TREE_ROOT_KEY, fileRootPath);
       else localStorage.removeItem(FILE_TREE_ROOT_KEY);
     } catch (_) {}
+    // 同步当前工作区根目录到主进程，便于相对路径读写都基于该工作区
+    if (fileRootPath && window.markwrite?.api?.setWorkspaceRoot) {
+      try { void window.markwrite.api.setWorkspaceRoot(fileRootPath); } catch (_) {}
+    }
   }
 
   function markFileSelected(targetPath) {
@@ -325,7 +329,27 @@ window.addEventListener('DOMContentLoaded', () => {
     const res = await window.markwrite.api.listDir(basePath || null);
     if (!res || res.error) return;
     const { path: base, entries } = res;
-    for (const entry of (entries || [])) {
+    const list = entries || [];
+
+    // 若目录为空，顶层给用户一点“有东西”的反馈（类似 . ..）
+    if (list.length === 0 && depth === 0) {
+      const makePlaceholder = (label, title) => {
+        const li = document.createElement('li');
+        li.className = 'file-list-item';
+        li.style.opacity = '0.6';
+        const name = document.createElement('span');
+        name.className = 'file-name';
+        name.textContent = label;
+        if (title) name.title = title;
+        li.appendChild(name);
+        return li;
+      };
+      container.appendChild(makePlaceholder('.', `当前工作区: ${base}`));
+      container.appendChild(makePlaceholder('..', '该目录为空，可以通过上方“打开”或在此工作区新建文件/子目录'));
+      return;
+    }
+
+    for (const entry of list) {
       const node = renderFileTreeNode(
         { ...entry, parentPath: base },
         depth
@@ -345,8 +369,16 @@ window.addEventListener('DOMContentLoaded', () => {
     await buildTree(fileRootPath, 0, fileTreeEl);
   }
 
-  // 启动时加载一次文件树（默认 root = 应用工作目录）
-  void loadFileTree();
+  // 启动时加载一次文件树（默认 root = ~/markwrite-docs，未保存过则用该工作区）
+  (async () => {
+    if (!fileRootPath && window.markwrite?.api?.getDefaultWorkspace) {
+      try {
+        const r = await window.markwrite.api.getDefaultWorkspace();
+        if (r?.path) setFileRoot(r.path);
+      } catch (_) {}
+    }
+    await loadFileTree();
+  })();
 
   // 预览开关：默认打开；点击「预览」在显示/隐藏之间切换
   const PREVIEW_KEY = 'markwrite-preview-open';

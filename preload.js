@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('markwrite', {
     uploadPastedImage: (payload) => ipcRenderer.invoke('image:pasteBinary', payload),
     uploadClipboardImage: () => ipcRenderer.invoke('image:fromClipboard'),
     listDir: (dirPath) => ipcRenderer.invoke('fs:listDir', dirPath),
+    getDefaultWorkspace: () => ipcRenderer.invoke('app:getDefaultWorkspace'),
+    setWorkspaceRoot: (dirPath) => ipcRenderer.invoke('app:setWorkspaceRoot', dirPath),
     renderMarkdown: (markdown) => ipcRenderer.invoke('markdown:render', markdown),
     aiChat: (message, context) => ipcRenderer.invoke('ai:chat', { message, context }),
     aiDocEdit: (message, context) => ipcRenderer.invoke('ai:docEdit', { message, context }),

@@ -4,8 +4,8 @@
   "description": "MarkWrite - A local-first Markdown desktop app with AI-assisted writing, built on Electron.",
   "main": "main.js",
   "scripts": {
-    "start": "ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron ."
-
+    "start": "ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
+    "sync-preview-theme": "node scripts/sync-preview-theme.mjs"
   },
   "keywords": [
     "markdown",
