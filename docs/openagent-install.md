@@ -1,9 +1,9 @@
 # OpenAgent 安装说明
 
-流程是**两步合一**：先用命令从 GitHub 拉取 openagent，再用本地的 `file:` 依赖安装，两者都保留在工程里。
+本项目通过 **Git 依赖** 引入 OpenAgent：`package.json` 中 `openagent` 为 `git+https://github.com/asmcos/openagent.git`，`@openagent/app` 与 `@openagent/core` 通过 `file:./node_modules/openagent/packages/...` 引用克隆后的子包。
 
-- **从 GitHub 取**：`preinstall` 会自动执行 `openagent:clone`（若目录不存在才克隆）。
-- **用 file 装**：`package.json` 里写的是 `file:./openagent-repo/packages/core` 和 `file:./openagent-repo/packages/app`，兼容 npm 和 Yarn。
+- **默认安装**：执行 `npm install` 时会使用 `package-lock.json` 里**锁定的提交**，因此装到的是安装当时锁定的版本（可能是较旧的）。
+- **获取最新 OpenAgent**：运行 `npm run update:openagent`，会从 GitHub 拉取默认分支最新提交并更新 `package-lock.json`，安装完成后即是最新版本。
 
 ## API Key 配置（与 openagent-example.mjs 一致）
 
@@ -36,4 +36,4 @@ npm run openagent:clone
 node openagent-example.mjs
 ```
 
-注意：`openagent-repo` 已在 `.gitignore` 中忽略，不会提交到仓库。若以后要更新 OpenAgent，可进入 `openagent-repo` 执行 `git pull`，再重新 `npm install` 或 `yarn install`。
+**升级到最新 OpenAgent**：执行 `npm run update:openagent` 即可拉取并安装仓库默认分支的最新代码（首次或更新时可能需等待 Git 克隆）。当前锁定版本可在 `package-lock.json` 中搜索 `node_modules/openagent` 的 `resolved` 字段查看提交 hash。

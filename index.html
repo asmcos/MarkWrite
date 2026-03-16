@@ -9,37 +9,56 @@
   </head>
   <body>
     <div class="titlebar">
-      <div>MarkWrite</div>
+      <div class="titlebar-left">
+        <span class="titlebar-logo">◆</span>
+        <span class="titlebar-title">MarkWrite</span>
+      </div>
       <div class="titlebar-right">
-        <span>Markdown · Local-first</span>
-        <span>AI-ready Shell</span>
+        <span class="titlebar-hint">Markdown · Local-first · AI-ready</span>
+        <div class="titlebar-window-controls">
+          <button type="button" class="window-btn window-btn-min" id="window-minimize" title="最小化">
+            <i class="bi bi-dash"></i>
+          </button>
+          <button type="button" class="window-btn window-btn-max" id="window-maximize" title="最大化 / 还原">
+            <i class="bi bi-square"></i>
+          </button>
+          <button type="button" class="window-btn window-btn-close" id="window-close" title="关闭">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
       </div>
     </div>
-    <div class="command-bar">
-      <div class="command-input">
-        <span class="k">⌘K</span>
-        <input
-          id="command-input"
-          placeholder="Ask AI, search files, or run a command…"
-        />
+    <!-- 页面内自定义菜单栏（不占用系统菜单） -->
+    <div class="menu-bar">
+      <div class="menu-bar-left">
+        <div class="menu-root">
+          <button type="button" class="menu-root-btn">File</button>
+          <div class="menu-dropdown">
+            <button type="button" id="menu-file-new">New File</button>
+            <button type="button" id="menu-file-open">Open…</button>
+            <button type="button" id="menu-file-save">Save</button>
+            <button type="button" id="menu-file-saveas">Save As…</button>
+            <button type="button" id="menu-file-open-workspace">Open Workspace…</button>
+          </div>
+        </div>
+        <div class="menu-root">
+          <button type="button" class="menu-root-btn">View</button>
+          <div class="menu-dropdown">
+            <button type="button" id="menu-view-toggle-explorer">Toggle Explorer</button>
+            <button type="button" id="menu-view-toggle-preview">Toggle Preview</button>
+            <hr />
+            <button type="button" id="menu-view-toggle-devtools">Toggle DevTools</button>
+          </div>
+        </div>
+        <div class="menu-root">
+          <button type="button" class="menu-root-btn">Settings</button>
+          <div class="menu-dropdown">
+            <button type="button" id="menu-settings-open">Open Settings…</button>
+          </div>
+        </div>
       </div>
-      <div class="command-buttons">
-        <button class="command-btn" id="btn-open" title="打开文件">
-          <span class="icon">📂</span>
-          <span>打开</span>
-        </button>
-        <button class="command-btn" id="btn-save" title="保存">
-          <span class="icon">💾</span>
-          <span>保存</span>
-        </button>
-        <button class="command-btn" id="btn-saveas" title="另存为">
-          <span class="icon">📄</span>
-          <span>另存为</span>
-        </button>
-        <button class="command-btn">
-          <span class="icon">⚙</span>
-          <span>设置</span>
-        </button>
+      <div class="menu-bar-right">
+        <!-- 预留将来放快速入口，例如同步状态等 -->
       </div>
     </div>
     <div class="app-container">
@@ -161,6 +180,59 @@
       <div class="statusbar-right">
         <span>MarkWrite · Shell v0.1</span>
         <span>AI: not configured</span>
+      </div>
+    </div>
+    <!-- 设置页：页面内大弹窗 -->
+    <div class="settings-overlay" id="settings-overlay" style="display:none;">
+      <div class="settings-box">
+        <div class="settings-header">
+          <div class="settings-title">Settings</div>
+          <button type="button" class="settings-close-btn" id="settings-close-btn" title="Close">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <div class="settings-tabs">
+          <button type="button" class="settings-tab active" data-tab="sync">Sync / Publish</button>
+          <button type="button" class="settings-tab" data-tab="workspace">Workspace</button>
+        </div>
+        <div class="settings-body">
+          <div class="settings-panel" data-tab-panel="sync">
+            <div class="settings-section-title">EventStore / Site (仅设计占位，后续可接入真实配置)</div>
+            <div class="settings-field">
+              <label>EventStore WebSocket</label>
+              <input id="settings-sync-esserver" type="text" placeholder="ws://127.0.0.1:8080/" />
+            </div>
+            <div class="settings-field">
+              <label>Upload Base URL</label>
+              <input id="settings-sync-uploadpath" type="text" placeholder="http://127.0.0.1:8081/uploads/" />
+            </div>
+            <div class="settings-field">
+              <label>Site Name</label>
+              <input id="settings-sync-sitename" type="text" placeholder="辰龙文档中心" />
+            </div>
+            <div class="settings-field">
+              <label>Domain</label>
+              <input id="settings-sync-domain" type="text" placeholder="https://docs.chenlongos.cn" />
+            </div>
+            <div class="settings-hint">
+              当前版本仅提供占位与展示，实际保存与同步逻辑可以后续与 eventstoreUI 的 config.js / esclient.ts 对齐。
+            </div>
+          </div>
+          <div class="settings-panel" data-tab-panel="workspace" style="display:none;">
+            <div class="settings-section-title">Workspace</div>
+            <div class="settings-field">
+              <label>Current Workspace</label>
+              <input id="settings-workspace-current" type="text" readonly />
+            </div>
+            <div class="settings-hint">
+              工作区由左侧「Open Workspace…」或顶部 File 菜单中的同名项设置。这里仅显示当前工作区路径。
+            </div>
+          </div>
+        </div>
+        <div class="settings-footer">
+          <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-cancel-btn">取消</button>
+          <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-save-btn">保存</button>
+        </div>
       </div>
     </div>
     <script src="/node_modules/monaco-editor/min/vs/loader.js"></script>

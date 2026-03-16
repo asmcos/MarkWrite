@@ -11,14 +11,40 @@ body {
   color: #111827;
   background-color: #0b1120;
 }
+/* 全局滚动条美化（包括右侧系统滚动条） */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: transparent;
+}
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.55);
+  border-radius: 999px;
+  border: 2px solid rgba(15, 23, 42, 0.95);
+}
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.85);
+}
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
+}
 body {
   display: flex;
   flex-direction: column;
+  /* 顶部标题栏和菜单固定，滚动限定在下面内容区域 */
+  overflow: hidden;
 }
 .titlebar {
   height: 28px;
   flex-shrink: 0;
-  padding: 0 12px;
+  padding: 0 8px 0 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -26,81 +52,149 @@ body {
   color: #e5e7eb;
   -webkit-app-region: drag;
 }
+.titlebar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.titlebar-logo {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: radial-gradient(circle at top left, #38bdf8, #4f46e5);
+  display: inline-block;
+}
+.titlebar-title {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.9;
+}
 .titlebar-right {
   display: flex;
-  gap: 8px;
-  font-size: 12px;
-  opacity: 0.8;
-}
-.command-bar {
-  height: 28px;
-  flex-shrink: 0;
-  padding: 4px 10px;
-  display: flex;
   align-items: center;
   gap: 8px;
-  background: radial-gradient(circle at top left, #020617, #020617);
-  border-bottom: 1px solid rgba(30, 64, 175, 0.7);
-  box-shadow: 0 1px 0 0 rgba(30, 64, 175, 0.6);
-}
-.command-input {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  border: 1px solid rgba(75, 85, 99, 0.9);
-  padding: 3px 8px;
-  background: radial-gradient(
-    circle at top left,
-    rgba(56, 189, 248, 0.15),
-    rgba(15, 23, 42, 0.95)
-  );
-  color: #9ca3af;
-  font-size: 12px;
-}
-.command-input span.k {
-  border-radius: 6px;
-  border: 1px solid rgba(75, 85, 99, 0.9);
-  padding: 1px 4px;
   font-size: 11px;
-  color: #9ca3af;
-  background-color: rgba(15, 23, 42, 0.95);
 }
-.command-input input {
-  flex: 1;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: #e5e7eb;
-  font-size: 12px;
-  font-family: inherit;
+.titlebar-hint {
+  opacity: 0.75;
 }
-.command-buttons {
-  display: flex;
-  gap: 6px;
-}
-.command-btn {
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(55, 65, 81, 0.9);
-  background: radial-gradient(
-    circle at top,
-    rgba(15, 118, 110, 0.4),
-    rgba(15, 23, 42, 0.95)
-  );
-  color: #a5f3fc;
-  font-size: 11px;
-  cursor: pointer;
+.titlebar-window-controls {
   display: flex;
   align-items: center;
   gap: 4px;
+  margin-left: 8px;
+  -webkit-app-region: no-drag;
 }
-.command-btn span.icon {
+.window-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.95);
+  color: #e5e7eb;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+}
+.window-btn i {
+  display: block;
+  line-height: 1;
+}
+.window-btn:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: rgba(56, 189, 248, 0.7);
+}
+.window-btn-close {
+  border-color: rgba(248, 113, 113, 0.7);
+}
+.window-btn-close:hover {
+  background: rgba(248, 113, 113, 0.9);
+  border-color: rgba(248, 113, 113, 1);
+}
+
+/* 仅最小化图标略微下移，其它保持垂直居中 */
+.window-btn-min i {
+  transform: translateY(3px);
+}
+}
+/* 旧命令栏（⌘K 输入）已移除 */
+
+/* 页面内自定义菜单栏 */
+.menu-bar {
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #020617, #020617);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.9);
+}
+.menu-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.menu-root {
+  position: relative;
+}
+.menu-root-btn {
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
   font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
 }
-.command-btn:hover {
-  filter: brightness(1.05);
+.menu-root-btn:hover {
+  background: rgba(30, 64, 175, 0.6);
+}
+.menu-dropdown {
+  position: absolute;
+  top: 22px;
+  left: 0;
+  min-width: 160px;
+  padding: 4px 0;
+  background: #020617;
+  border-radius: 8px;
+  border: 1px solid rgba(30, 64, 175, 0.7);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  display: none;
+  z-index: 2000;
+}
+.menu-root:hover .menu-dropdown {
+  display: block;
+}
+.menu-dropdown button {
+  width: 100%;
+  text-align: left;
+  padding: 4px 12px;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+.menu-dropdown button:hover {
+  background: rgba(30, 64, 175, 0.9);
+}
+.menu-dropdown hr {
+  margin: 4px 0;
+  border: none;
+  border-top: 1px solid rgba(30, 64, 175, 0.7);
+}
+.menu-bar-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #9ca3af;
 }
 
 /* Apply-to-editor confirm modal (OpenAgent tool + code-block apply) */
@@ -190,6 +284,121 @@ body {
 .apply-editor-btn-secondary {
   background: rgba(30, 41, 59, 0.55);
 }
+
+/* 设置页弹窗 */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 12000;
+  padding: 24px;
+}
+.settings-box {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  border-radius: 14px;
+  padding: 16px 18px 14px;
+  background: linear-gradient(160deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.65);
+  color: #e5e7eb;
+  display: flex;
+  flex-direction: column;
+}
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.settings-title {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+}
+.settings-close-btn {
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 999px;
+}
+.settings-close-btn:hover {
+  background: rgba(30, 64, 175, 0.9);
+  color: #e5e7eb;
+}
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.settings-tab {
+  border-radius: 999px;
+  border: 1px solid rgba(55, 65, 81, 0.9);
+  padding: 3px 10px;
+  font-size: 11px;
+  background: rgba(15, 23, 42, 0.95);
+  color: #9ca3af;
+  cursor: pointer;
+}
+.settings-tab.active {
+  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.5), rgba(15, 23, 42, 0.98));
+  border-color: rgba(59, 130, 246, 0.9);
+  color: #e5e7eb;
+}
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+  font-size: 12px;
+}
+.settings-panel {
+  display: block;
+}
+.settings-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.settings-field label {
+  font-size: 11px;
+  color: #9ca3af;
+}
+.settings-field input,
+.settings-field select {
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.96);
+  color: #e5e7eb;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.settings-field input:read-only {
+  opacity: 0.8;
+}
+.settings-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  line-height: 1.5;
+}
+.settings-footer {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .table-size-overlay {
   position: fixed;
   inset: 0;
@@ -245,7 +454,8 @@ body {
   grid-template-columns: var(--files-width, 240px) 1fr 6px var(--chat-width, 320px);
   grid-template-rows: 1fr;
   min-height: 0;
-  height: calc(100vh - 28px - 28px - 20px - 8px);
+  /* 只减去 titlebar (28) + statusbar (20) + 上下间距约 8px */
+  height: calc(100vh - 28px - 20px - 8px);
   margin-top: 8px;
   padding: 0 12px 8px;
   background: radial-gradient(circle at top, #1f2937 0, #020617 40%);

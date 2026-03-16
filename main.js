@@ -92,6 +92,8 @@ function createWindow(port) {
     width: 1280,
     height: 1040,
     icon: iconImage || undefined,
+    frame: false, // 使用自绘标题栏与边框
+    titleBarStyle: 'hidden', // macOS 上更贴合系统样式，其它平台会忽略
     webPreferences: {
       sandbox: false,
       preload: path.join(__dirname, 'preload.js'),
@@ -115,8 +117,8 @@ function createWindow(port) {
     menu.popup({ window: mainWindow });
   });
 
-  // Uncomment for devtools during development
-  // mainWindow.webContents.openDevTools();
+  // 应用菜单改为完全由前端页面自绘，这里清空系统级菜单
+  Menu.setApplicationMenu(null);
 }
 
 /** Linux: 注册 .desktop 到 ~/.local/share/applications，程序坞用其 Icon 匹配 WM_CLASS */
@@ -491,6 +493,39 @@ ipcMain.handle('markdown:render', async (_, markdown) => {
   } catch (e) {
     return `<p>渲染失败: ${e.message}</p>`;
   }
+});
+
+// 切换 DevTools：供前端自定义菜单调用
+ipcMain.handle('app:toggleDevTools', () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!win) return false;
+  const wc = win.webContents;
+  if (wc.isDevToolsOpened()) wc.closeDevTools();
+  else wc.openDevTools({ mode: 'detach' });
+  return true;
+});
+
+// 窗口控制：最小化 / 最大化或还原 / 关闭
+ipcMain.handle('app:window:minimize', () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!win) return false;
+  win.minimize();
+  return true;
+});
+
+ipcMain.handle('app:window:maximizeOrRestore', () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!win) return false;
+  if (win.isMaximized()) win.unmaximize();
+  else win.maximize();
+  return true;
+});
+
+ipcMain.handle('app:window:close', () => {
+  const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  if (!win) return false;
+  win.close();
+  return true;
 });
 
 const { getBackend } = require('./lib/backends/index.js');

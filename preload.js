@@ -39,6 +39,10 @@ contextBridge.exposeInMainWorld('markwrite', {
     aiModels: (directory) => ipcRenderer.invoke('ai:models', { directory }),
     aiConfigGet: () => ipcRenderer.invoke('ai:config:get'),
     aiConfigSave: (config) => ipcRenderer.invoke('ai:config:save', config),
+    toggleDevTools: () => ipcRenderer.invoke('app:toggleDevTools'),
+    windowMinimize: () => ipcRenderer.invoke('app:window:minimize'),
+    windowMaximizeOrRestore: () => ipcRenderer.invoke('app:window:maximizeOrRestore'),
+    windowClose: () => ipcRenderer.invoke('app:window:close'),
   },
 });
 

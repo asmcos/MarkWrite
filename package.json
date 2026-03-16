@@ -5,7 +5,8 @@
   "main": "main.js",
   "scripts": {
     "start": "ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
-    "sync-preview-theme": "node scripts/sync-preview-theme.mjs"
+    "sync-preview-theme": "node scripts/sync-preview-theme.mjs",
+    "update:openagent": "npm install git+https://github.com/asmcos/openagent.git --save-dev"
   },
   "keywords": [
     "markdown",

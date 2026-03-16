@@ -35,6 +35,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
   const container = document.getElementById('monaco-container');
   const editorFilename = document.getElementById('editor-filename');
+  // 旧的文件操作按钮（已在 UI 隐藏，仍可复用其逻辑）
   const btnOpen = document.getElementById('btn-open');
   const btnToggleExplorer = document.getElementById('btn-toggle-explorer');
   const btnExpandExplorer = document.getElementById('btn-expand-explorer');
@@ -42,6 +43,28 @@ window.addEventListener('DOMContentLoaded', () => {
   const btnNew = document.getElementById('btn-new');
   const btnSave = document.getElementById('btn-save');
   const btnSaveAs = document.getElementById('btn-saveas');
+  // 顶部自定义菜单项
+  const menuFileNew = document.getElementById('menu-file-new');
+  const menuFileOpen = document.getElementById('menu-file-open');
+  const menuFileSave = document.getElementById('menu-file-save');
+  const menuFileSaveAs = document.getElementById('menu-file-saveas');
+  const menuFileOpenWorkspace = document.getElementById('menu-file-open-workspace');
+  const menuViewToggleExplorer = document.getElementById('menu-view-toggle-explorer');
+  const menuViewTogglePreview = document.getElementById('menu-view-toggle-preview');
+  const menuViewToggleDevTools = document.getElementById('menu-view-toggle-devtools');
+  const menuSettingsOpen = document.getElementById('menu-settings-open');
+  // 设置弹窗元素
+  const settingsOverlay = document.getElementById('settings-overlay');
+  const settingsCloseBtn = document.getElementById('settings-close-btn');
+  const settingsCancelBtn = document.getElementById('settings-cancel-btn');
+  const settingsSaveBtn = document.getElementById('settings-save-btn');
+  const settingsTabs = Array.from(document.querySelectorAll('.settings-tab'));
+  const settingsPanels = Array.from(document.querySelectorAll('.settings-panel'));
+  const settingsEsserver = document.getElementById('settings-sync-esserver');
+  const settingsUploadpath = document.getElementById('settings-sync-uploadpath');
+  const settingsSitename = document.getElementById('settings-sync-sitename');
+  const settingsDomain = document.getElementById('settings-sync-domain');
+  const settingsWorkspaceCurrent = document.getElementById('settings-workspace-current');
   const previewToggle = document.getElementById('preview-toggle');
   const editorWithPreview = document.getElementById('editor-with-preview');
   const splitterChat = document.getElementById('splitter-chat');
@@ -49,6 +72,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const aiMessages = document.getElementById('ai-messages');
   const aiInput = document.getElementById('ai-input');
   const aiSend = document.getElementById('ai-send');
+  const btnWinMin = document.getElementById('window-minimize');
+  const btnWinMax = document.getElementById('window-maximize');
+  const btnWinClose = document.getElementById('window-close');
   let editor = null;
   let currentFilePath = null;
   // 若 AI 通过 markwrite_apply_content 回写，则这里会收到 apply-editor-content
@@ -143,6 +169,51 @@ window.addEventListener('DOMContentLoaded', () => {
     applyLayoutState();
   }
 
+  // ---- 顶部菜单项与原有按钮的行为复用 ----
+  function doNewFile() {
+    if (!editor) return;
+    editor.setValue('');
+    setFilename(null);
+    editor.focus();
+  }
+
+  async function doOpenFileOrWorkspace() {
+    if (!window.markwrite || !window.markwrite.api) return;
+    const result = await window.markwrite.api.openFile();
+    if (!result) return;
+    // 若选择的是目录，则将该目录作为文件树根；若选择的是文件，则打开文件并将其所在目录作为文件树根
+    if (result.directory) {
+      setFileRoot(result.directory);
+      await loadFileTree();
+    } else if (result.filePath && editor) {
+      editor.setValue(result.content);
+      setFilename(result.filePath);
+      const dir = result.filePath.replace(/[\\/][^\\/]+$/, '');
+      if (dir) {
+        setFileRoot(dir);
+        await loadFileTree();
+      }
+    }
+  }
+
+  async function doSave() {
+    if (!editor || !window.markwrite || !window.markwrite.api) return;
+    const content = editor.getValue();
+    if (currentFilePath) {
+      const ok = await window.markwrite.api.saveFile(currentFilePath, content);
+      if (ok) setFilename(currentFilePath);
+    } else {
+      const p = await window.markwrite.api.saveAs(content);
+      if (p) setFilename(p);
+    }
+  }
+
+  async function doSaveAs() {
+    if (!editor || !window.markwrite || !window.markwrite.api) return;
+    const p = await window.markwrite.api.saveAs(editor.getValue());
+    if (p) setFilename(p);
+  }
+
   applyLayoutState();
   if (btnToggleExplorer) btnToggleExplorer.addEventListener('click', toggleExplorer);
   if (btnExpandExplorer) btnExpandExplorer.addEventListener('click', () => {
@@ -151,6 +222,13 @@ window.addEventListener('DOMContentLoaded', () => {
   });
   if (btnRefreshFiles && window.markwrite && window.markwrite.api) {
     btnRefreshFiles.addEventListener("click", () => { void loadFileTree(); });
+  }
+
+  // 顶部菜单中的 View → Toggle Explorer 复用相同行为
+  if (menuViewToggleExplorer) {
+    menuViewToggleExplorer.addEventListener('click', () => {
+      toggleExplorer();
+    });
   }
 
   // 右侧聊天面板宽度：拖拽分隔线调整（像 VSCode）
@@ -182,6 +260,69 @@ window.addEventListener('DOMContentLoaded', () => {
       document.body.classList.add('is-resizing');
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
+    });
+  }
+
+  // ----- 设置弹窗：Tab 切换与打开/关闭 -----
+  function openSettingsModal() {
+    if (!settingsOverlay) return;
+    settingsOverlay.style.display = 'flex';
+    // 默认选中 Sync Tab
+    if (settingsTabs.length && settingsPanels.length) {
+      const first = settingsTabs[0];
+      const tabName = first.getAttribute('data-tab');
+      switchSettingsTab(tabName || 'sync');
+    }
+    // 预填 Workspace 只读展示
+    if (settingsWorkspaceCurrent && window.markwrite?.api?.getDefaultWorkspace) {
+      window.markwrite.api.getDefaultWorkspace().then((r) => {
+        if (!r) return;
+        settingsWorkspaceCurrent.value = r.path || '';
+      }).catch(() => {});
+    }
+  }
+
+  function closeSettingsModal() {
+    if (!settingsOverlay) return;
+    settingsOverlay.style.display = 'none';
+  }
+
+  function switchSettingsTab(name) {
+    settingsTabs.forEach((tab) => {
+      const t = tab.getAttribute('data-tab');
+      tab.classList.toggle('active', t === name);
+    });
+    settingsPanels.forEach((panel) => {
+      const t = panel.getAttribute('data-tab-panel');
+      // eslint-disable-next-line no-param-reassign
+      panel.style.display = t === name ? 'block' : 'none';
+    });
+  }
+
+  if (settingsTabs.length) {
+    settingsTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const name = tab.getAttribute('data-tab') || 'sync';
+        switchSettingsTab(name);
+      });
+    });
+  }
+  if (settingsOverlay) {
+    settingsOverlay.addEventListener('click', (e) => {
+      if (e.target === settingsOverlay) closeSettingsModal();
+    });
+  }
+  if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', closeSettingsModal);
+  if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', closeSettingsModal);
+  if (settingsSaveBtn) {
+    // 目前 Sync / Workspace 仅展示占位，保存按钮先作为“关闭”使用
+    settingsSaveBtn.addEventListener('click', closeSettingsModal);
+  }
+
+  // 菜单触发 Settings 弹窗
+  if (menuSettingsOpen) {
+    menuSettingsOpen.addEventListener('click', () => {
+      openSettingsModal();
     });
   }
 
@@ -567,6 +708,43 @@ window.addEventListener('DOMContentLoaded', () => {
     previewBackBtn.addEventListener('click', function () {
       previewOpen = false;
       applyPreviewState();
+    });
+  }
+
+  // 顶部菜单中的 View → Toggle Preview：直接切换预览开关
+  if (menuViewTogglePreview) {
+    menuViewTogglePreview.addEventListener('click', () => {
+      previewOpen = !previewOpen;
+      applyPreviewState();
+    });
+  }
+
+  // View → Toggle DevTools：调用主进程切换开发者工具
+  if (menuViewToggleDevTools && window.markwrite?.api?.toggleDevTools) {
+    menuViewToggleDevTools.addEventListener('click', () => {
+      try {
+        void window.markwrite.api.toggleDevTools();
+      } catch (_) {}
+    });
+  }
+
+  // 自定义窗口控制按钮：最小化 / 最大化 / 关闭
+  if (btnWinMin && window.markwrite?.api?.windowMinimize) {
+    btnWinMin.addEventListener('click', (e) => {
+      e.preventDefault();
+      try { void window.markwrite.api.windowMinimize(); } catch (_) {}
+    });
+  }
+  if (btnWinMax && window.markwrite?.api?.windowMaximizeOrRestore) {
+    btnWinMax.addEventListener('click', (e) => {
+      e.preventDefault();
+      try { void window.markwrite.api.windowMaximizeOrRestore(); } catch (_) {}
+    });
+  }
+  if (btnWinClose && window.markwrite?.api?.windowClose) {
+    btnWinClose.addEventListener('click', (e) => {
+      e.preventDefault();
+      try { void window.markwrite.api.windowClose(); } catch (_) {}
     });
   }
 
@@ -974,53 +1152,39 @@ window.addEventListener('DOMContentLoaded', () => {
 
   if (btnNew) {
     btnNew.addEventListener('click', () => {
-      if (editor) {
-        editor.setValue('');
-        setFilename(null);
-        editor.focus();
-      }
+      doNewFile();
     });
   }
   if (btnOpen && window.markwrite && window.markwrite.api) {
-    btnOpen.addEventListener('click', async () => {
-      const result = await window.markwrite.api.openFile();
-      if (!result) return;
-      // 若选择的是目录，则将该目录作为文件树根；若选择的是文件，则打开文件并将其所在目录作为文件树根
-      if (result.directory) {
-        setFileRoot(result.directory);
-        await loadFileTree();
-      } else if (result.filePath && editor) {
-        editor.setValue(result.content);
-        setFilename(result.filePath);
-        const dir = result.filePath.replace(/[\\/][^\\/]+$/, '');
-        if (dir) {
-          setFileRoot(dir);
-          await loadFileTree();
-        }
-      }
-    });
+    btnOpen.addEventListener('click', () => { void doOpenFileOrWorkspace(); });
   }
 
   if (btnSave && window.markwrite && window.markwrite.api) {
-    btnSave.addEventListener('click', async () => {
-      if (!editor) return;
-      const content = editor.getValue();
-      if (currentFilePath) {
-        const ok = await window.markwrite.api.saveFile(currentFilePath, content);
-        if (ok) setFilename(currentFilePath);
-      } else {
-        const path = await window.markwrite.api.saveAs(content);
-        if (path) setFilename(path);
-      }
-    });
+    btnSave.addEventListener('click', () => { void doSave(); });
   }
 
   if (btnSaveAs && window.markwrite && window.markwrite.api) {
-    btnSaveAs.addEventListener('click', async () => {
-      if (!editor) return;
-      const path = await window.markwrite.api.saveAs(editor.getValue());
-      if (path) setFilename(path);
+    btnSaveAs.addEventListener('click', () => { void doSaveAs(); });
+  }
+
+  // 顶部菜单 File 分组：行为与底部按钮完全一致
+  if (menuFileNew) {
+    menuFileNew.addEventListener('click', () => {
+      doNewFile();
     });
+  }
+  if (menuFileOpen) {
+    menuFileOpen.addEventListener('click', () => { void doOpenFileOrWorkspace(); });
+  }
+  if (menuFileSave) {
+    menuFileSave.addEventListener('click', () => { void doSave(); });
+  }
+  if (menuFileSaveAs) {
+    menuFileSaveAs.addEventListener('click', () => { void doSaveAs(); });
+  }
+  if (menuFileOpenWorkspace) {
+    // 打开工作区：逻辑与「打开」相同，但用户语义是优先选目录
+    menuFileOpenWorkspace.addEventListener('click', () => { void doOpenFileOrWorkspace(); });
   }
 
   function appendMessage(role, content) {
