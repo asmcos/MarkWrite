@@ -191,47 +191,78 @@
             <i class="bi bi-x-lg"></i>
           </button>
         </div>
-        <div class="settings-tabs">
-          <button type="button" class="settings-tab active" data-tab="sync">Sync / Publish</button>
-          <button type="button" class="settings-tab" data-tab="workspace">Workspace</button>
-        </div>
         <div class="settings-body">
-          <div class="settings-panel" data-tab-panel="sync">
-            <div class="settings-section-title">EventStore / Site (仅设计占位，后续可接入真实配置)</div>
-            <div class="settings-field">
-              <label>EventStore WebSocket</label>
-              <input id="settings-sync-esserver" type="text" placeholder="ws://127.0.0.1:8080/" />
+          <div class="settings-nav">
+            <div class="settings-nav-group">
+              <div class="settings-nav-title">Sync</div>
+              <button type="button" class="settings-tab active" data-tab="sync">Sync &amp; Servers</button>
             </div>
-            <div class="settings-field">
-              <label>Upload Base URL</label>
-              <input id="settings-sync-uploadpath" type="text" placeholder="http://127.0.0.1:8081/uploads/" />
+            <div class="settings-nav-group">
+              <div class="settings-nav-title">Workspace</div>
+              <button type="button" class="settings-tab" data-tab="workspace">Current Workspace</button>
             </div>
-            <div class="settings-field">
-              <label>Site Name</label>
-              <input id="settings-sync-sitename" type="text" placeholder="辰龙文档中心" />
-            </div>
-            <div class="settings-field">
-              <label>Domain</label>
-              <input id="settings-sync-domain" type="text" placeholder="https://docs.chenlongos.cn" />
-            </div>
-            <div class="settings-hint">
-              当前版本仅提供占位与展示，实际保存与同步逻辑可以后续与 eventstoreUI 的 config.js / esclient.ts 对齐。
+          </div>
+          <div class="settings-panels">
+            <div class="settings-panel" data-tab-panel="sync">
+            <div class="settings-section-title">Sync & Servers</div>
+            <div class="settings-sync-layout">
+              <div class="settings-sync-sidebar">
+                <div class="settings-sync-sidebar-header">
+                  <span class="settings-sync-sidebar-title">Servers</span>
+                  <div class="settings-sync-sidebar-actions">
+                    <button type="button" class="settings-sync-icon-btn" id="settings-sync-new" title="新建服务器">
+                      <i class="bi bi-plus-lg"></i>
+                    </button>
+                    <button type="button" class="settings-sync-icon-btn" id="settings-sync-duplicate" title="另存为配置">
+                      <i class="bi bi-files"></i>
+                    </button>
+                  </div>
+                </div>
+                <ul class="settings-sync-server-list" id="settings-sync-server-list">
+                  <!-- 动态填充服务器列表 -->
+                </ul>
+              </div>
+              <div class="settings-sync-main">
+                <div class="settings-field">
+                  <label>Profile Name</label>
+                  <input id="settings-sync-name" type="text" placeholder="例如：本地 / 远程 1 / 生产环境" />
+                </div>
+                <div class="settings-field">
+                  <label>EventStore WebSocket</label>
+                  <input id="settings-sync-esserver" type="text" placeholder="ws://127.0.0.1:8080/" />
+                </div>
+                <div class="settings-field">
+                  <label>Upload Base URL</label>
+                  <input id="settings-sync-uploadpath" type="text" placeholder="http://127.0.0.1:8081/uploads/" />
+                </div>
+                <div class="settings-field">
+                  <label>Site Name</label>
+                  <input id="settings-sync-sitename" type="text" placeholder="辰龙文档中心" />
+                </div>
+                <div class="settings-field">
+                  <label>Domain</label>
+                  <input id="settings-sync-domain" type="text" placeholder="https://docs.chenlongos.cn" />
+                </div>
+                <div class="settings-hint">
+                  左侧为服务器列表（本地 / 远程 1 / 远程 2 等），右侧为当前选中服务器的一组配置。当前版本仅在内存中维护配置，实际持久化与同步逻辑可后续与 eventstoreUI 的 config.js / esclient.ts 对齐。
+                </div>
+                <div class="settings-sync-actions">
+                  <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-sync-cancel-btn">取消</button>
+                  <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-sync-save-btn">保存 Sync 配置</button>
+                </div>
+              </div>
             </div>
           </div>
           <div class="settings-panel" data-tab-panel="workspace" style="display:none;">
-            <div class="settings-section-title">Workspace</div>
+            <div class="settings-section-title">Workspace（只读显示）</div>
             <div class="settings-field">
               <label>Current Workspace</label>
               <input id="settings-workspace-current" type="text" readonly />
             </div>
             <div class="settings-hint">
-              工作区由左侧「Open Workspace…」或顶部 File 菜单中的同名项设置。这里仅显示当前工作区路径。
+              当前工作区路径仅供查看。要切换或修改工作区，请在主界面使用左侧 Files 面板或顶部 File &gt; Open Workspace…。
             </div>
           </div>
-        </div>
-        <div class="settings-footer">
-          <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-cancel-btn">取消</button>
-          <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-save-btn">保存</button>
         </div>
       </div>
     </div>

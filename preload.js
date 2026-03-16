@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('markwrite', {
     windowMinimize: () => ipcRenderer.invoke('app:window:minimize'),
     windowMaximizeOrRestore: () => ipcRenderer.invoke('app:window:maximizeOrRestore'),
     windowClose: () => ipcRenderer.invoke('app:window:close'),
+    syncGetConfig: () => ipcRenderer.invoke('sync:getConfig'),
+    syncSaveConfig: (cfg) => ipcRenderer.invoke('sync:saveConfig', cfg),
   },
 });
 

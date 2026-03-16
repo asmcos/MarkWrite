@@ -12,7 +12,9 @@ const PORT_BASE = 3131;
 const PORT_LAST = 3140;
 const ROOT = __dirname;
 const DEFAULT_WORKSPACE = path.join(os.homedir(), 'markwrite-docs');
-const WORKSPACE_ROOT_FILE = path.join(os.homedir(), '.config', 'markwrite', 'workspace-root');
+const MARKWRITE_CFG_DIR = path.join(os.homedir(), '.config', 'markwrite');
+const WORKSPACE_ROOT_FILE = path.join(MARKWRITE_CFG_DIR, 'workspace-root');
+const SYNC_CONFIG_FILE = path.join(MARKWRITE_CFG_DIR, 'sync-servers.json');
 let workspaceRoot = DEFAULT_WORKSPACE;
 let workspaceWatcher = null;
 let workspaceChangeTimer = null;
@@ -492,6 +494,52 @@ ipcMain.handle('markdown:render', async (_, markdown) => {
     return renderMarkdown(markdown || '');
   } catch (e) {
     return `<p>渲染失败: ${e.message}</p>`;
+  }
+});
+
+// Sync & Servers 配置：读写 ~/.config/markwrite/sync-servers.json
+ipcMain.handle('sync:getConfig', async () => {
+  try {
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      if (Array.isArray(data.servers) && data.servers.length > 0) {
+        return {
+          servers: data.servers,
+          activeId: data.activeId || (data.servers[0] && data.servers[0].id) || null,
+        };
+      }
+    }
+  } catch (_) {}
+  // 默认返回一个本地配置
+  const fallback = {
+    servers: [
+      {
+        id: 'local',
+        name: '本地',
+        esserver: 'ws://127.0.0.1:8080/',
+        uploadpath: 'http://127.0.0.1:8081/uploads/',
+        sitename: '辰龙文档中心',
+        domain: 'http://localhost:5173',
+      },
+    ],
+    activeId: 'local',
+  };
+  return fallback;
+});
+
+ipcMain.handle('sync:saveConfig', async (_event, payload) => {
+  try {
+    const cfgDir = MARKWRITE_CFG_DIR;
+    fs.mkdirSync(cfgDir, { recursive: true });
+    const toSave = {
+      servers: Array.isArray(payload && payload.servers) ? payload.servers : [],
+      activeId: payload && typeof payload.activeId === 'string' ? payload.activeId : null,
+    };
+    fs.writeFileSync(SYNC_CONFIG_FILE, JSON.stringify(toSave, null, 2), 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
   }
 });
 

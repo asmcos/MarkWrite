@@ -121,7 +121,6 @@ body {
 .window-btn-min i {
   transform: translateY(3px);
 }
-}
 /* 旧命令栏（⌘K 输入）已移除 */
 
 /* 页面内自定义菜单栏 */
@@ -332,31 +331,52 @@ body {
   background: rgba(30, 64, 175, 0.9);
   color: #e5e7eb;
 }
-.settings-tabs {
-  display: flex;
-  gap: 6px;
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 12px;
+  font-size: 12px;
+}
+.settings-nav {
+  padding-right: 8px;
+  border-right: 1px solid rgba(31, 41, 55, 0.9);
+}
+.settings-nav-group {
   margin-bottom: 10px;
 }
+.settings-nav-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
 .settings-tab {
-  border-radius: 999px;
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
   border: 1px solid rgba(55, 65, 81, 0.9);
-  padding: 3px 10px;
+  padding: 5px 8px;
   font-size: 11px;
   background: rgba(15, 23, 42, 0.95);
   color: #9ca3af;
   cursor: pointer;
+}
+.settings-tab + .settings-tab {
+  margin-top: 4px;
 }
 .settings-tab.active {
   background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.5), rgba(15, 23, 42, 0.98));
   border-color: rgba(59, 130, 246, 0.9);
   color: #e5e7eb;
 }
-.settings-body {
+.settings-panels {
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
-  font-size: 12px;
 }
 .settings-panel {
   display: block;
@@ -365,6 +385,102 @@ body {
   font-size: 12px;
   font-weight: 600;
   margin-bottom: 8px;
+}
+.settings-sync-layout {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 12px;
+  align-items: flex-start;
+}
+.settings-sync-sidebar {
+  border-radius: 10px;
+  border: 1px solid rgba(55, 65, 81, 0.9);
+  background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.92));
+  padding: 8px 8px 6px;
+  font-size: 12px;
+}
+.settings-sync-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.settings-sync-sidebar-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+}
+.settings-sync-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.settings-sync-icon-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(75, 85, 99, 0.9);
+  background: rgba(15, 23, 42, 0.95);
+  color: #e5e7eb;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+}
+.settings-sync-icon-btn:hover {
+  background: rgba(56, 189, 248, 0.25);
+  border-color: rgba(56, 189, 248, 0.7);
+}
+.settings-sync-server-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  max-height: 210px;
+  overflow: auto;
+}
+.settings-sync-server-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+.settings-sync-server-item:hover {
+  background: rgba(30, 41, 59, 0.85);
+}
+.settings-sync-server-item.is-active {
+  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.4), rgba(15, 23, 42, 0.98));
+  border: 1px solid rgba(59, 130, 246, 0.9);
+}
+.settings-sync-server-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #6b7280;
+  flex-shrink: 0;
+}
+.settings-sync-server-item.is-active .settings-sync-server-dot {
+  background: #22c55e;
+}
+.settings-sync-server-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.settings-sync-main {
+  padding: 4px 2px 0;
+}
+.settings-sync-actions {
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .settings-field {
   display: flex;
@@ -395,9 +511,7 @@ body {
 }
 .settings-footer {
   margin-top: 10px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
+  display: none;
 }
 .table-size-overlay {
   position: fixed;

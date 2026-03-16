@@ -57,13 +57,19 @@ window.addEventListener('DOMContentLoaded', () => {
   const settingsOverlay = document.getElementById('settings-overlay');
   const settingsCloseBtn = document.getElementById('settings-close-btn');
   const settingsCancelBtn = document.getElementById('settings-cancel-btn');
-  const settingsSaveBtn = document.getElementById('settings-save-btn');
+  const settingsSaveBtn = document.getElementById('settings-save-btn'); // 全局 footer 目前隐藏，仅保留兼容
+  const settingsSyncSaveBtn = document.getElementById('settings-sync-save-btn');
+  const settingsSyncCancelBtn = document.getElementById('settings-sync-cancel-btn');
   const settingsTabs = Array.from(document.querySelectorAll('.settings-tab'));
   const settingsPanels = Array.from(document.querySelectorAll('.settings-panel'));
+  const settingsSyncName = document.getElementById('settings-sync-name');
   const settingsEsserver = document.getElementById('settings-sync-esserver');
   const settingsUploadpath = document.getElementById('settings-sync-uploadpath');
   const settingsSitename = document.getElementById('settings-sync-sitename');
   const settingsDomain = document.getElementById('settings-sync-domain');
+  const settingsSyncServerList = document.getElementById('settings-sync-server-list');
+  const settingsSyncNewBtn = document.getElementById('settings-sync-new');
+  const settingsSyncDuplicateBtn = document.getElementById('settings-sync-duplicate');
   const settingsWorkspaceCurrent = document.getElementById('settings-workspace-current');
   const previewToggle = document.getElementById('preview-toggle');
   const editorWithPreview = document.getElementById('editor-with-preview');
@@ -131,6 +137,59 @@ window.addEventListener('DOMContentLoaded', () => {
   // ---- VSCode-like 布局：聊天宽度拖拽 + 文件侧栏收起/展开 ----
   const LAYOUT_CHAT_WIDTH_KEY = 'markwrite-layout-chat-width'; // number px
   const LAYOUT_EXPLORER_HIDDEN_KEY = 'markwrite-layout-explorer-hidden'; // '1' | '0'
+
+  // Sync 服务器配置：当前仅在内存中维护一组 profile，后续可接入持久化
+  let syncServers = [];
+  let activeSyncServerId = null;
+
+  function getActiveSyncServer() {
+    return syncServers.find((s) => s.id === activeSyncServerId) || syncServers[0] || null;
+  }
+
+  function renderSyncServerList() {
+    if (!settingsSyncServerList) return;
+    settingsSyncServerList.innerHTML = '';
+    syncServers.forEach((srv) => {
+      const li = document.createElement('li');
+      li.className = 'settings-sync-server-item';
+      if (srv.id === activeSyncServerId) li.classList.add('is-active');
+      li.dataset.id = srv.id;
+      const dot = document.createElement('span');
+      dot.className = 'settings-sync-server-dot';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'settings-sync-server-name';
+      nameEl.textContent = srv.name || '(未命名服务器)';
+      li.appendChild(dot);
+      li.appendChild(nameEl);
+      li.addEventListener('click', () => {
+        activeSyncServerId = srv.id;
+        renderSyncServerList();
+        fillSyncFormFromActive();
+      });
+      settingsSyncServerList.appendChild(li);
+    });
+  }
+
+  function fillSyncFormFromActive() {
+    const cur = getActiveSyncServer();
+    if (!cur) return;
+    if (settingsSyncName) settingsSyncName.value = cur.name || '';
+    if (settingsEsserver) settingsEsserver.value = cur.esserver || '';
+    if (settingsUploadpath) settingsUploadpath.value = cur.uploadpath || '';
+    if (settingsSitename) settingsSitename.value = cur.sitename || '';
+    if (settingsDomain) settingsDomain.value = cur.domain || '';
+  }
+
+  function saveFormToActive() {
+    const cur = getActiveSyncServer();
+    if (!cur) return;
+    if (settingsSyncName) cur.name = settingsSyncName.value || cur.name;
+    if (settingsEsserver) cur.esserver = settingsEsserver.value || '';
+    if (settingsUploadpath) cur.uploadpath = settingsUploadpath.value || '';
+    if (settingsSitename) cur.sitename = settingsSitename.value || '';
+    if (settingsDomain) cur.domain = settingsDomain.value || '';
+    renderSyncServerList();
+  }
 
   function getChatWidth() {
     try {
@@ -273,6 +332,23 @@ window.addEventListener('DOMContentLoaded', () => {
       const tabName = first.getAttribute('data-tab');
       switchSettingsTab(tabName || 'sync');
     }
+    // 从主进程加载 Sync & Servers 配置
+    if (window.markwrite?.api?.syncGetConfig) {
+      window.markwrite.api.syncGetConfig().then((cfg) => {
+        if (!cfg) return;
+        syncServers = Array.isArray(cfg.servers) ? cfg.servers.slice() : [];
+        activeSyncServerId = cfg.activeId || (syncServers[0] && syncServers[0].id) || null;
+        renderSyncServerList();
+        fillSyncFormFromActive();
+      }).catch(() => {
+        // 失败时仍使用内存中的默认结构（可能为空）
+        renderSyncServerList();
+        fillSyncFormFromActive();
+      });
+    } else {
+      renderSyncServerList();
+      fillSyncFormFromActive();
+    }
     // 预填 Workspace 只读展示
     if (settingsWorkspaceCurrent && window.markwrite?.api?.getDefaultWorkspace) {
       window.markwrite.api.getDefaultWorkspace().then((r) => {
@@ -287,6 +363,8 @@ window.addEventListener('DOMContentLoaded', () => {
     settingsOverlay.style.display = 'none';
   }
 
+  let currentSettingsTab = 'sync';
+
   function switchSettingsTab(name) {
     settingsTabs.forEach((tab) => {
       const t = tab.getAttribute('data-tab');
@@ -297,6 +375,7 @@ window.addEventListener('DOMContentLoaded', () => {
       // eslint-disable-next-line no-param-reassign
       panel.style.display = t === name ? 'block' : 'none';
     });
+    currentSettingsTab = name;
   }
 
   if (settingsTabs.length) {
@@ -315,8 +394,125 @@ window.addEventListener('DOMContentLoaded', () => {
   if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', closeSettingsModal);
   if (settingsCancelBtn) settingsCancelBtn.addEventListener('click', closeSettingsModal);
   if (settingsSaveBtn) {
-    // 目前 Sync / Workspace 仅展示占位，保存按钮先作为“关闭”使用
-    settingsSaveBtn.addEventListener('click', closeSettingsModal);
+    // 旧的全局保存按钮已隐藏，这里保持向后兼容：等同于「Sync 保存」
+    settingsSaveBtn.addEventListener('click', () => {
+      if (!window.markwrite?.api?.syncSaveConfig) {
+        closeSettingsModal();
+        return;
+      }
+      saveFormToActive();
+      const payload = {
+        servers: syncServers,
+        activeId: activeSyncServerId || (syncServers[0] && syncServers[0].id) || null,
+      };
+      window.markwrite.api.syncSaveConfig(payload).finally(() => {
+        closeSettingsModal();
+      });
+    });
+  }
+
+  // Sync & Servers 表单变更时实时写回当前 profile
+  if (settingsSyncName) {
+    settingsSyncName.addEventListener('input', () => {
+      saveFormToActive();
+    });
+  }
+  if (settingsEsserver) {
+    settingsEsserver.addEventListener('input', () => {
+      saveFormToActive();
+    });
+  }
+  if (settingsUploadpath) {
+    settingsUploadpath.addEventListener('input', () => {
+      saveFormToActive();
+    });
+  }
+  if (settingsSitename) {
+    settingsSitename.addEventListener('input', () => {
+      saveFormToActive();
+    });
+  }
+  if (settingsDomain) {
+    settingsDomain.addEventListener('input', () => {
+      saveFormToActive();
+    });
+  }
+
+  if (settingsSyncCancelBtn) {
+    settingsSyncCancelBtn.addEventListener('click', () => {
+      // 取消：丢弃未保存修改，重新从磁盘加载 Sync 配置
+      if (window.markwrite?.api?.syncGetConfig) {
+        window.markwrite.api.syncGetConfig().then((cfg) => {
+          if (!cfg) return;
+          syncServers = Array.isArray(cfg.servers) ? cfg.servers.slice() : [];
+          activeSyncServerId = cfg.activeId || (syncServers[0] && syncServers[0].id) || null;
+          renderSyncServerList();
+          fillSyncFormFromActive();
+        }).catch(() => {});
+      }
+    });
+  }
+
+  if (settingsSyncSaveBtn && window.markwrite?.api?.syncSaveConfig) {
+    settingsSyncSaveBtn.addEventListener('click', () => {
+      saveFormToActive();
+      const payload = {
+        servers: syncServers,
+        activeId: activeSyncServerId || (syncServers[0] && syncServers[0].id) || null,
+      };
+      window.markwrite.api.syncSaveConfig(payload).catch(() => {});
+    });
+  }
+
+  if (settingsSyncNewBtn) {
+    settingsSyncNewBtn.addEventListener('click', () => {
+      const idBase = 'server';
+      let idx = syncServers.length + 1;
+      let id = `${idBase}-${idx}`;
+      while (syncServers.some((s) => s.id === id)) {
+        idx += 1;
+        id = `${idBase}-${idx}`;
+      }
+      const srv = {
+        id,
+        name: `Server ${idx}`,
+        esserver: '',
+        uploadpath: '',
+        sitename: '',
+        domain: '',
+      };
+      syncServers.push(srv);
+      activeSyncServerId = srv.id;
+      renderSyncServerList();
+      fillSyncFormFromActive();
+    });
+  }
+
+  if (settingsSyncDuplicateBtn) {
+    settingsSyncDuplicateBtn.addEventListener('click', () => {
+      const cur = getActiveSyncServer();
+      if (!cur) return;
+      const baseName = cur.name || 'Server';
+      const idBase = cur.id || 'server';
+      let idx = 1;
+      let id = `${idBase}-copy-${idx}`;
+      while (syncServers.some((s) => s.id === id)) {
+        idx += 1;
+        id = `${idBase}-copy-${idx}`;
+      }
+      const srv = {
+        id,
+        name: `${baseName} (copy ${idx})`,
+        esserver: cur.esserver,
+        uploadpath: cur.uploadpath,
+        sitename: cur.sitename,
+        domain: cur.domain,
+      };
+      syncServers.push(srv);
+      activeSyncServerId = srv.id;
+      renderSyncServerList();
+      fillSyncFormFromActive();
+    });
   }
 
   // 菜单触发 Settings 弹窗
