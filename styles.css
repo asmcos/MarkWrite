@@ -482,6 +482,9 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
+.settings-identity-actions {
+  justify-content: flex-start;
+}
 .settings-field {
   display: flex;
   flex-direction: column;
@@ -493,25 +496,185 @@ body {
   color: #9ca3af;
 }
 .settings-field input,
-.settings-field select {
+.settings-field select,
+.settings-field textarea {
   border-radius: 6px;
   border: 1px solid rgba(148, 163, 184, 0.45);
   background: rgba(15, 23, 42, 0.96);
   color: #e5e7eb;
   font-size: 12px;
   padding: 5px 8px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.settings-field input::placeholder,
+.settings-field textarea::placeholder {
+  color: rgba(148, 163, 184, 0.55);
+}
+.settings-field input:not([readonly]):focus,
+.settings-field textarea:not([readonly]):focus {
+  outline: 1px solid rgba(56, 189, 248, 0.5);
+  outline-offset: 0;
 }
 .settings-field input:read-only {
   opacity: 0.8;
+}
+.settings-field input:read-only::placeholder {
+  color: rgba(148, 163, 184, 0.45);
 }
 .settings-hint {
   font-size: 11px;
   color: #9ca3af;
   line-height: 1.5;
 }
+.settings-identity-priv-row {
+  display: flex;
+  gap: 6px;
+}
+.settings-identity-priv-row textarea {
+  flex: 1;
+}
+.settings-identity-copy-btn {
+  align-self: flex-start;
+  margin-top: 0;
+  padding: 4px 10px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(148, 163, 184, 0.6);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e5e7eb;
+  cursor: pointer;
+}
+.settings-identity-copy-btn:hover {
+  border-color: rgba(56, 189, 248, 0.8);
+}
 .settings-footer {
   margin-top: 10px;
   display: none;
+}
+/* 用户 / 帐号：远程 profile 状态区 */
+.settings-identity-profile-block {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+.settings-identity-profile-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.settings-identity-profile-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(148, 163, 184, 0.4);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: settings-profile-spin 0.7s linear infinite;
+}
+@keyframes settings-profile-spin {
+  to { transform: rotate(360deg); }
+}
+.settings-identity-profile-has {
+  font-size: 12px;
+  color: #86efac;
+}
+.settings-identity-profile-has i {
+  margin-right: 4px;
+  color: #22c55e;
+}
+.settings-identity-profile-empty {
+  font-size: 12px;
+  color: #94a3b8;
+}
+.settings-identity-profile-error {
+  font-size: 11px;
+  color: #f87171;
+  margin-top: 4px;
+}
+.settings-identity-actions-row {
+  justify-content: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+}
+/* 个人资料表单卡片（参考 eventstoreUI profile 页） */
+.settings-identity-profile-form-wrap {
+  margin-top: 0;
+  padding-top: 0;
+}
+.profile-form-card {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.profile-form-header {
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  padding: 14px 16px;
+}
+.profile-form-title {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+.profile-form-subtitle {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+.profile-form-body {
+  padding: 16px;
+}
+.profile-form-field {
+  margin-bottom: 14px;
+}
+.profile-form-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+.profile-form-input,
+.profile-form-textarea {
+  width: 100%;
+  max-width: 320px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.96);
+  color: #e5e7eb;
+  font-size: 13px;
+  padding: 8px 10px;
+}
+.profile-form-textarea {
+  max-width: 100%;
+  min-height: 80px;
+  resize: vertical;
+}
+.profile-form-avatar-preview {
+  margin-top: 6px;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px dashed rgba(148, 163, 184, 0.4);
+  overflow: hidden;
+}
+.profile-form-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.profile-form-actions {
+  margin-top: 18px;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-start;
 }
 .table-size-overlay {
   position: fixed;

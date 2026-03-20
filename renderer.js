@@ -12,7 +12,15 @@ window.copyCode = function copyCode(btn) {
   }
 };
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  const settingsBody = document.getElementById('settings-body');
+  if (settingsBody) {
+    try {
+      const res = await fetch('/settings-modal.html');
+      if (res.ok) settingsBody.innerHTML = await res.text();
+    } catch (_) {}
+  }
+
   const PREVIEW_THEME_CSS = [
     'base.css',
     'vars.css',
@@ -60,6 +68,29 @@ window.addEventListener('DOMContentLoaded', () => {
   const settingsSaveBtn = document.getElementById('settings-save-btn'); // 全局 footer 目前隐藏，仅保留兼容
   const settingsSyncSaveBtn = document.getElementById('settings-sync-save-btn');
   const settingsSyncCancelBtn = document.getElementById('settings-sync-cancel-btn');
+  const settingsIdentityPub = document.getElementById('settings-identity-pubkey');
+  const settingsIdentityPriv = document.getElementById('settings-identity-privkey');
+  const settingsIdentityEmptyHint = document.getElementById('settings-identity-empty-hint');
+  const settingsIdentityGenerateMainBtn = document.getElementById('settings-identity-generate-main-btn');
+  const settingsIdentitySaveBtn = document.getElementById('settings-identity-save-btn');
+  const settingsIdentityProfileBlock = document.getElementById('settings-identity-profile-block');
+  const settingsIdentityProfileLoading = document.getElementById('settings-identity-profile-loading');
+  const settingsIdentityProfileHas = document.getElementById('settings-identity-profile-has');
+  const settingsIdentityProfileEmpty = document.getElementById('settings-identity-profile-empty');
+  const settingsIdentityProfileError = document.getElementById('settings-identity-profile-error');
+  const settingsIdentityProfileName = document.getElementById('settings-identity-profile-name');
+  const settingsIdentityProfileSetBtn = document.getElementById('settings-identity-profile-set-btn');
+  const settingsIdentityProfileSkipBtn = document.getElementById('settings-identity-profile-skip-btn');
+  const settingsIdentityProfileFormWrap = document.getElementById('settings-identity-profile-form-wrap');
+  const settingsIdentityKeySection = document.getElementById('settings-identity-key-section');
+  const settingsProfileNameInput = document.getElementById('settings-profile-name');
+  const settingsProfileTitleInput = document.getElementById('settings-profile-title');
+  const settingsProfileAvatarInput = document.getElementById('settings-profile-avatar');
+  const settingsProfileBioInput = document.getElementById('settings-profile-bio');
+  const settingsProfileAvatarPreview = document.getElementById('settings-profile-avatar-preview');
+  const settingsProfileSaveBtn = document.getElementById('settings-profile-save-btn');
+  const settingsProfileBackBtn = document.getElementById('settings-profile-back-btn');
+  const settingsIdentityCopyBtn = document.getElementById('settings-identity-copy-btn');
   const settingsTabs = Array.from(document.querySelectorAll('.settings-tab'));
   const settingsPanels = Array.from(document.querySelectorAll('.settings-panel'));
   const settingsSyncName = document.getElementById('settings-sync-name');
@@ -356,6 +387,37 @@ window.addEventListener('DOMContentLoaded', () => {
         settingsWorkspaceCurrent.value = r.path || '';
       }).catch(() => {});
     }
+    // 预填 Identity（可选）
+    if (window.markwrite?.api?.identityGet && (settingsIdentityPub || settingsIdentityPriv)) {
+      window.markwrite.api.identityGet().then((id) => {
+        if (!id) return;
+        const hasPriv = !!(id.privkey && typeof id.privkey === 'string' && id.privkey.trim());
+        const hasPub = !!((id.pubkeyHex || id.pubkeyEpub || id.pubkey) && String(id.pubkeyHex || id.pubkeyEpub || id.pubkey).trim());
+        identityHasExisting = hasPriv || hasPub;
+        const displayPub = id.pubkeyEpub || id.pubkey || id.pubkeyHex || '';
+        if (settingsIdentityPub) settingsIdentityPub.value = displayPub;
+        if (settingsIdentityPriv) settingsIdentityPriv.value = id.privkey || '';
+        if (settingsIdentityEmptyHint) {
+          settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
+        }
+        if (settingsIdentityGenerateMainBtn) {
+          settingsIdentityGenerateMainBtn.style.display = identityHasExisting ? 'none' : 'inline-flex';
+        }
+        if (settingsIdentitySaveBtn) {
+          settingsIdentitySaveBtn.textContent = identityHasExisting ? '注销当前用户' : '保存用户密钥';
+        }
+      }).catch(() => {
+        identityHasExisting = false;
+        if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
+        if (settingsIdentityGenerateMainBtn) settingsIdentityGenerateMainBtn.style.display = 'inline-flex';
+        if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '保存用户密钥';
+      });
+    } else if (settingsIdentityEmptyHint) {
+      identityHasExisting = false;
+      settingsIdentityEmptyHint.style.display = 'block';
+      if (settingsIdentityGenerateMainBtn) settingsIdentityGenerateMainBtn.style.display = 'inline-flex';
+      if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '保存用户密钥';
+    }
   }
 
   function closeSettingsModal() {
@@ -364,6 +426,8 @@ window.addEventListener('DOMContentLoaded', () => {
   }
 
   let currentSettingsTab = 'sync';
+  let identityHasExisting = false;
+  let lastDerivedEsec = '';
 
   function switchSettingsTab(name) {
     settingsTabs.forEach((tab) => {
@@ -376,6 +440,48 @@ window.addEventListener('DOMContentLoaded', () => {
       panel.style.display = t === name ? 'block' : 'none';
     });
     currentSettingsTab = name;
+    if (name === 'identity' && window.markwrite?.api?.identityFetchProfile) {
+      startCheckProfile();
+    }
+  }
+
+  /** 检查远程 profile：老用户看是否有资料，新用户提示完善。丝滑无弹窗，仅更新状态区 */
+  function startCheckProfile() {
+    if (!settingsIdentityProfileBlock || !window.markwrite?.api?.identityFetchProfile) return;
+    settingsIdentityProfileBlock.style.display = 'block';
+    if (settingsIdentityProfileLoading) settingsIdentityProfileLoading.style.display = 'flex';
+    if (settingsIdentityProfileHas) settingsIdentityProfileHas.style.display = 'none';
+    if (settingsIdentityProfileEmpty) settingsIdentityProfileEmpty.style.display = 'none';
+    if (settingsIdentityProfileError) {
+      settingsIdentityProfileError.style.display = 'none';
+      settingsIdentityProfileError.textContent = '';
+    }
+    window.markwrite.api.identityFetchProfile().then((res) => {
+      if (settingsIdentityProfileLoading) settingsIdentityProfileLoading.style.display = 'none';
+      if (!res) return;
+      if (!res.ok) {
+        if (settingsIdentityProfileError) {
+          settingsIdentityProfileError.textContent = res.message || '检查失败';
+          settingsIdentityProfileError.style.display = 'block';
+        }
+        return;
+      }
+      const profile = res.profile;
+      if (profile && (profile.name || profile.nickname || profile.avatar)) {
+        if (settingsIdentityProfileHas) {
+          settingsIdentityProfileName.textContent = profile.name || profile.nickname || '(已设置)';
+          settingsIdentityProfileHas.style.display = 'block';
+        }
+      } else {
+        if (settingsIdentityProfileEmpty) settingsIdentityProfileEmpty.style.display = 'block';
+      }
+    }).catch(() => {
+      if (settingsIdentityProfileLoading) settingsIdentityProfileLoading.style.display = 'none';
+      if (settingsIdentityProfileError) {
+        settingsIdentityProfileError.textContent = '网络或服务异常';
+        settingsIdentityProfileError.style.display = 'block';
+      }
+    });
   }
 
   if (settingsTabs.length) {
@@ -461,6 +567,205 @@ window.addEventListener('DOMContentLoaded', () => {
         activeId: activeSyncServerId || (syncServers[0] && syncServers[0].id) || null,
       };
       window.markwrite.api.syncSaveConfig(payload).catch(() => {});
+    });
+  }
+
+  // Identity / Account 保存（无「取消」按钮）
+  if (settingsIdentitySaveBtn && window.markwrite?.api?.identitySave) {
+    settingsIdentitySaveBtn.addEventListener('click', () => {
+      if (identityHasExisting) {
+        // 已有用户：此按钮作为「注销当前用户」，前置一次确认
+        // eslint-disable-next-line no-alert
+        const ok = window.confirm('建议先复制并备份好 ESEC 密钥。\n确定要注销并清除当前用户的本地密钥吗？');
+        if (!ok) return;
+        const payload = { pubkey: '', privkey: '' };
+        window.markwrite.api.identitySave(payload).then((res) => {
+          if (res && res.ok) {
+            identityHasExisting = false;
+            if (settingsIdentityPub) settingsIdentityPub.value = '';
+            if (settingsIdentityPriv) settingsIdentityPriv.value = '';
+            if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
+            if (settingsIdentityGenerateMainBtn) settingsIdentityGenerateMainBtn.style.display = 'inline-flex';
+            if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '保存用户密钥';
+          } else {
+            // eslint-disable-next-line no-alert
+            alert((res && res.message) || '注销失败');
+          }
+        }).catch((e) => {
+          // eslint-disable-next-line no-alert
+          alert(`注销失败：${e && e.message ? e.message : String(e)}`);
+        });
+      } else {
+        // 新用户：正常保存密钥
+        const payload = {
+          pubkey: settingsIdentityPub ? settingsIdentityPub.value.trim() : '',
+          privkey: settingsIdentityPriv ? settingsIdentityPriv.value.trim() : '',
+        };
+        window.markwrite.api.identitySave(payload).then((res) => {
+          if (res && res.ok) {
+            identityHasExisting = !!(payload.privkey && payload.privkey.trim());
+            if (settingsIdentityEmptyHint) {
+              settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
+            }
+            if (settingsIdentityGenerateMainBtn) {
+              settingsIdentityGenerateMainBtn.style.display = identityHasExisting ? 'none' : 'inline-flex';
+            }
+            if (settingsIdentitySaveBtn) {
+              settingsIdentitySaveBtn.textContent = identityHasExisting ? '注销当前用户' : '保存用户密钥';
+            }
+            if (identityHasExisting) {
+              // 保存成功后，从主进程重新拉一遍 identity，确保 pubkey（epub）立即更新
+              if (window.markwrite?.api?.identityGet) {
+                window.markwrite.api.identityGet().then((id) => {
+                  if (!id) return;
+                  const displayPub = id.pubkeyEpub || id.pubkey || id.pubkeyHex || '';
+                  if (settingsIdentityPub) settingsIdentityPub.value = displayPub;
+                }).catch(() => {});
+              }
+              startCheckProfile();
+            }
+          } else {
+            // eslint-disable-next-line no-alert
+            alert((res && res.message) || '保存失败');
+          }
+        }).catch((e) => {
+          // eslint-disable-next-line no-alert
+          alert(`保存身份失败：${e && e.message ? e.message : String(e)}`);
+        });
+      }
+    });
+  }
+
+  if (settingsIdentityCopyBtn) {
+    settingsIdentityCopyBtn.addEventListener('click', () => {
+      const v = (settingsIdentityPriv && settingsIdentityPriv.value) || '';
+      if (!v.trim() || !window.markwrite?.api?.clipboardWriteText) return;
+      const showCopyState = (text) => {
+        const oldText = settingsIdentityCopyBtn.textContent;
+        settingsIdentityCopyBtn.textContent = text;
+        setTimeout(() => {
+          settingsIdentityCopyBtn.textContent = oldText;
+        }, 5000);
+      };
+      window.markwrite.api.clipboardWriteText(v).then((res) => {
+        if (res && res.ok) showCopyState('已复制');
+        else showCopyState('复制失败');
+      }).catch(() => {
+        showCopyState('复制失败');
+      });
+    });
+  }
+
+  function handleGenerateIdentity() {
+    if (!window.markwrite?.api?.identityGenerate) return;
+    window.markwrite.api.identityGenerate().then((result) => {
+      if (!result || !result.ok) {
+        // eslint-disable-next-line no-alert
+        alert(`生成 ESEC 失败：${(result && result.message) || '未知错误'}`);
+        return;
+      }
+      if (settingsIdentityPriv) settingsIdentityPriv.value = result.esec || '';
+      if (settingsIdentityPub) settingsIdentityPub.value = result.epub || result.pubkeyHex || '';
+      if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'none';
+      identityHasExisting = true;
+      if (settingsIdentityGenerateMainBtn) settingsIdentityGenerateMainBtn.style.display = 'none';
+      if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '注销当前用户';
+      startCheckProfile();
+    }).catch((e) => {
+      // eslint-disable-next-line no-alert
+      alert(`生成 ESEC 失败：${e && e.message ? e.message : String(e)}`);
+    });
+  }
+
+  if (settingsIdentityGenerateMainBtn && window.markwrite?.api?.identityGenerate) {
+    settingsIdentityGenerateMainBtn.addEventListener('click', handleGenerateIdentity);
+  }
+
+  // 在 ESEC 框中粘贴/输入新 esec 时，自动计算并填充 epub 公钥（仅本地展示，不保存）
+  if (settingsIdentityPriv && window.markwrite?.api?.identityDeriveFromEsec) {
+    settingsIdentityPriv.addEventListener('input', () => {
+      const v = (settingsIdentityPriv.value || '').trim();
+      if (!v || !v.startsWith('esec') || v === lastDerivedEsec) return;
+      // 简单长度判断，避免每个按键都触发
+      if (v.length < 10) return;
+      lastDerivedEsec = v;
+      window.markwrite.api.identityDeriveFromEsec(v).then((res) => {
+        if (!res || !res.ok) return;
+        if (settingsIdentityPub) settingsIdentityPub.value = res.pubkeyEpub || res.pubkeyHex || '';
+      }).catch(() => {});
+    });
+  }
+
+  if (settingsIdentityProfileSetBtn && settingsIdentityProfileFormWrap && settingsIdentityKeySection) {
+    settingsIdentityProfileSetBtn.addEventListener('click', () => {
+      settingsIdentityKeySection.style.display = 'none';
+      settingsIdentityProfileFormWrap.style.display = 'block';
+      if (settingsIdentityProfileEmpty) settingsIdentityProfileEmpty.style.display = 'none';
+      if (settingsProfileNameInput) settingsProfileNameInput.focus();
+      if (window.markwrite?.api?.identityFetchProfile) {
+        window.markwrite.api.identityFetchProfile().then((res) => {
+          if (res && res.ok && res.profile) {
+            const p = res.profile;
+            if (settingsProfileNameInput) settingsProfileNameInput.value = p.displayName || p.name || '';
+            if (settingsProfileTitleInput) settingsProfileTitleInput.value = p.title || '';
+            if (settingsProfileAvatarInput) settingsProfileAvatarInput.value = p.avatarUrl || p.avatar || '';
+            if (settingsProfileBioInput) settingsProfileBioInput.value = p.bio || '';
+            if (settingsProfileAvatarPreview && (p.avatarUrl || p.avatar)) {
+              const img = document.createElement('img');
+              img.src = p.avatarUrl || p.avatar;
+              img.alt = '';
+              settingsProfileAvatarPreview.innerHTML = '';
+              settingsProfileAvatarPreview.appendChild(img);
+            }
+          }
+        }).catch(() => {});
+      }
+    });
+  }
+  if (settingsProfileBackBtn && settingsIdentityProfileFormWrap && settingsIdentityKeySection) {
+    settingsProfileBackBtn.addEventListener('click', () => {
+      settingsIdentityProfileFormWrap.style.display = 'none';
+      settingsIdentityKeySection.style.display = 'block';
+    });
+  }
+  if (settingsIdentityProfileSkipBtn && settingsIdentityProfileEmpty) {
+    settingsIdentityProfileSkipBtn.addEventListener('click', () => {
+      settingsIdentityProfileEmpty.style.display = 'none';
+    });
+  }
+  if (settingsProfileAvatarInput && settingsProfileAvatarPreview) {
+    settingsProfileAvatarInput.addEventListener('input', () => {
+      const url = (settingsProfileAvatarInput.value || '').trim();
+      settingsProfileAvatarPreview.innerHTML = '';
+      if (url) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = '';
+        img.onerror = () => { settingsProfileAvatarPreview.innerHTML = ''; };
+        settingsProfileAvatarPreview.appendChild(img);
+      }
+    });
+  }
+  if (settingsProfileSaveBtn && window.markwrite?.api?.identitySaveProfile) {
+    settingsProfileSaveBtn.addEventListener('click', () => {
+      const displayName = (settingsProfileNameInput && settingsProfileNameInput.value.trim()) || '';
+      const title = (settingsProfileTitleInput && settingsProfileTitleInput.value.trim()) || '';
+      const avatarUrl = (settingsProfileAvatarInput && settingsProfileAvatarInput.value.trim()) || '';
+      const bio = (settingsProfileBioInput && settingsProfileBioInput.value.trim()) || '';
+      const profile = { displayName, title, avatarUrl, bio };
+      window.markwrite.api.identitySaveProfile(profile).then((res) => {
+        if (res && res.ok) {
+          settingsIdentityProfileFormWrap.style.display = 'none';
+          if (settingsIdentityKeySection) settingsIdentityKeySection.style.display = 'block';
+          startCheckProfile();
+        } else {
+          // eslint-disable-next-line no-alert
+          alert(res && res.message ? res.message : '保存失败');
+        }
+      }).catch((e) => {
+        // eslint-disable-next-line no-alert
+        alert(`保存失败：${e && e.message ? e.message : String(e)}`);
+      });
     });
   }
 

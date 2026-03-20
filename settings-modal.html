@@ -1,0 +1,152 @@
+<!-- 设置弹窗内容（按功能分割，由 renderer 加载到 #settings-body） -->
+<div class="settings-nav">
+  <div class="settings-nav-group">
+    <div class="settings-nav-title">Sync</div>
+    <button type="button" class="settings-tab active" data-tab="sync">Sync &amp; Servers</button>
+  </div>
+  <div class="settings-nav-group">
+    <div class="settings-nav-title">Workspace</div>
+    <button type="button" class="settings-tab" data-tab="workspace">Current Workspace</button>
+  </div>
+  <div class="settings-nav-group">
+    <div class="settings-nav-title">用户</div>
+    <button type="button" class="settings-tab" data-tab="identity">用户 / 帐号</button>
+  </div>
+</div>
+<div class="settings-panels">
+  <div class="settings-panel" data-tab-panel="sync">
+    <div class="settings-section-title">Sync & Servers</div>
+    <div class="settings-sync-layout">
+      <div class="settings-sync-sidebar">
+        <div class="settings-sync-sidebar-header">
+          <span class="settings-sync-sidebar-title">Servers</span>
+          <div class="settings-sync-sidebar-actions">
+            <button type="button" class="settings-sync-icon-btn" id="settings-sync-new" title="新建服务器">
+              <i class="bi bi-plus-lg"></i>
+            </button>
+            <button type="button" class="settings-sync-icon-btn" id="settings-sync-duplicate" title="另存为配置">
+              <i class="bi bi-files"></i>
+            </button>
+          </div>
+        </div>
+        <ul class="settings-sync-server-list" id="settings-sync-server-list"></ul>
+      </div>
+      <div class="settings-sync-main">
+        <div class="settings-field">
+          <label>Profile Name</label>
+          <input id="settings-sync-name" type="text" autocomplete="off" placeholder="选填，如：本地 / 远程1" />
+        </div>
+        <div class="settings-field">
+          <label>EventStore WebSocket</label>
+          <input id="settings-sync-esserver" type="text" autocomplete="off" placeholder="选填，如：ws://127.0.0.1:8080/" />
+        </div>
+        <div class="settings-field">
+          <label>Upload Base URL</label>
+          <input id="settings-sync-uploadpath" type="text" autocomplete="off" placeholder="选填，如：http://127.0.0.1:8081/uploads/" />
+        </div>
+        <div class="settings-field">
+          <label>Site Name</label>
+          <input id="settings-sync-sitename" type="text" autocomplete="off" placeholder="选填，如：辰龙文档中心" />
+        </div>
+        <div class="settings-field">
+          <label>Domain</label>
+          <input id="settings-sync-domain" type="text" autocomplete="off" placeholder="选填，如：https://docs.example.com" />
+        </div>
+        <div class="settings-hint">
+          左侧为服务器列表（本地 / 远程 1 / 远程 2 等），右侧为当前选中服务器的一组配置。
+        </div>
+        <div class="settings-sync-actions">
+          <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-sync-cancel-btn">取消</button>
+          <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-sync-save-btn">保存 Sync 配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="settings-panel" data-tab-panel="workspace" style="display:none;">
+    <div class="settings-section-title">Workspace（只读显示）</div>
+    <div class="settings-field">
+      <label>Current Workspace</label>
+      <input id="settings-workspace-current" type="text" readonly />
+    </div>
+    <div class="settings-hint">
+      当前工作区路径仅供查看。要切换或修改工作区，请在主界面使用左侧 Files 面板或顶部 File &gt; Open Workspace…。
+    </div>
+  </div>
+  <div class="settings-panel" data-tab-panel="identity" style="display:none;">
+    <div id="settings-identity-key-section">
+      <div class="settings-section-title">用户 / 帐号（EventStore 身份）</div>
+      <div class="settings-hint" id="settings-identity-empty-hint" style="display:none;">
+        目前还没有配置 ESEC 身份。可粘贴已有的 <code>esec1...</code> 或点击下方「生成新用户密钥」。
+      </div>
+      <div class="settings-field">
+        <label>ESEC 密钥（仅保存在本地，不上传服务器）</label>
+        <div class="settings-identity-priv-row">
+          <textarea id="settings-identity-privkey" rows="3" placeholder="粘贴或导入 ESEC 密钥，例如 esec1..." ></textarea>
+          <button type="button" class="settings-identity-copy-btn" id="settings-identity-copy-btn" title="复制 ESEC 密钥">
+            复制
+          </button>
+        </div>
+      </div>
+      <div class="settings-field">
+        <label>公钥（可选，只读，仅供查看）</label>
+        <input id="settings-identity-pubkey" type="text" readonly placeholder="例如：epub1..." />
+      </div>
+      <div class="settings-hint">
+        MarkWrite 只在本机保存密钥，用于对发送到 EventStore 的内容进行签名，不会将密钥上传到任何服务器。
+      </div>
+      <div class="settings-sync-actions settings-identity-actions-row">
+        <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-identity-generate-main-btn">生成新用户密钥</button>
+        <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-identity-save-btn">保存用户密钥</button>
+      </div>
+      <div class="settings-identity-profile-block" id="settings-identity-profile-block" style="display:none;">
+        <div class="settings-identity-profile-loading" id="settings-identity-profile-loading" style="display:none;">
+          <span class="settings-identity-profile-spinner"></span>
+          正在检查远程资料…
+        </div>
+        <div class="settings-identity-profile-has" id="settings-identity-profile-has" style="display:none;">
+          <i class="bi bi-check-circle-fill"></i>
+          已有资料：<span id="settings-identity-profile-name"></span>
+        </div>
+        <div class="settings-identity-profile-empty" id="settings-identity-profile-empty" style="display:none;">
+          <span>尚未设置资料，是否现在完善？</span>
+          <div class="settings-sync-actions" style="margin-top:8px;">
+            <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-identity-profile-set-btn">去设置</button>
+            <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-identity-profile-skip-btn">稍后</button>
+          </div>
+        </div>
+        <div class="settings-identity-profile-error" id="settings-identity-profile-error" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="settings-identity-profile-form-wrap" id="settings-identity-profile-form-wrap" style="display:none;">
+      <div class="profile-form-card">
+        <div class="profile-form-header">
+          <h2 class="profile-form-title">个人资料设置</h2>
+          <p class="profile-form-subtitle">自定义您的个人主页展示</p>
+        </div>
+        <div class="profile-form-body">
+          <div class="profile-form-field">
+            <label class="profile-form-label">用户名</label>
+            <input id="settings-profile-name" type="text" class="profile-form-input" placeholder="显示名称" maxlength="32" />
+          </div>
+          <div class="profile-form-field">
+            <label class="profile-form-label">职业</label>
+            <input id="settings-profile-title" type="text" class="profile-form-input" placeholder="选填，如：开发者" maxlength="20" />
+          </div>
+          <div class="profile-form-field">
+            <label class="profile-form-label">头像 URL</label>
+            <input id="settings-profile-avatar" type="text" class="profile-form-input" placeholder="https://..." />
+            <div class="profile-form-avatar-preview" id="settings-profile-avatar-preview"></div>
+          </div>
+          <div class="profile-form-field">
+            <label class="profile-form-label">个人简介</label>
+            <textarea id="settings-profile-bio" class="profile-form-textarea" rows="4" placeholder="介绍一下自己，让读者更了解您…"></textarea>
+          </div>
+          <div class="profile-form-actions">
+            <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-profile-back-btn">返回</button>
+            <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-profile-save-btn">保存到服务器</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

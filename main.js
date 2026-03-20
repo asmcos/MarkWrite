@@ -15,12 +15,15 @@ const DEFAULT_WORKSPACE = path.join(os.homedir(), 'markwrite-docs');
 const MARKWRITE_CFG_DIR = path.join(os.homedir(), '.config', 'markwrite');
 const WORKSPACE_ROOT_FILE = path.join(MARKWRITE_CFG_DIR, 'workspace-root');
 const SYNC_CONFIG_FILE = path.join(MARKWRITE_CFG_DIR, 'sync-servers.json');
+const IDENTITY_FILE = path.join(MARKWRITE_CFG_DIR, 'identity.json');
+let eventstoreKeyLib = null;
 let workspaceRoot = DEFAULT_WORKSPACE;
 let workspaceWatcher = null;
 let workspaceChangeTimer = null;
 let mainWindow = null;
 
 const { render: renderMarkdown } = require('./md-renderer.js');
+const { fetchProfile: fetchEventstoreProfile, saveProfile: saveEventstoreProfile } = require('./lib/eventstore-profile.js');
 
 function createServer() {
   const mime = {
@@ -350,6 +353,18 @@ ipcMain.handle('image:fromClipboard', async () => {
   }
 });
 
+// 将文本写入系统剪贴板：用于 ESEC 复制按钮，避免浏览器剪贴板限制
+ipcMain.handle('clipboard:writeText', async (_event, text) => {
+  try {
+    const v = typeof text === 'string' ? text : String(text || '');
+    if (!v.trim()) return { ok: false, message: 'empty' };
+    clipboard.writeText(v);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
 // 默认/当前工作区：~/markwrite-docs，或由前端设置的工作区
 function ensureDefaultWorkspace() {
   try {
@@ -538,6 +553,192 @@ ipcMain.handle('sync:saveConfig', async (_event, payload) => {
     };
     fs.writeFileSync(SYNC_CONFIG_FILE, JSON.stringify(toSave, null, 2), 'utf8');
     return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+// 身份配置：读写 ~/.config/markwrite/identity.json
+ipcMain.handle('identity:get', async () => {
+  try {
+    if (fs.existsSync(IDENTITY_FILE)) {
+      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      const pubkeyHex = typeof data.pubkeyHex === 'string'
+        ? data.pubkeyHex
+        : (typeof data.pubkey === 'string' ? data.pubkey : '');
+      let pubkeyEpub = typeof data.pubkeyEpub === 'string' ? data.pubkeyEpub : '';
+      try {
+        if (!pubkeyEpub && pubkeyHex) {
+          if (!eventstoreKeyLib) {
+            // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+            eventstoreKeyLib = require('eventstore-tools/src/key');
+          }
+          if (eventstoreKeyLib && typeof eventstoreKeyLib.epubEncode === 'function') {
+            pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
+          }
+        }
+      } catch (_) {}
+      return {
+        pubkey: pubkeyEpub || pubkeyHex || '',
+        pubkeyHex,
+        pubkeyEpub,
+        privkey: typeof data.privkey === 'string' ? data.privkey : '',
+      };
+    }
+  } catch (_) {}
+  return { pubkey: '', pubkeyHex: '', pubkeyEpub: '', privkey: '' };
+});
+
+ipcMain.handle('identity:save', async (_event, payload) => {
+  try {
+    if (!eventstoreKeyLib) {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      eventstoreKeyLib = require('eventstore-tools/src/key');
+    }
+    fs.mkdirSync(MARKWRITE_CFG_DIR, { recursive: true });
+    const rawPub = payload && typeof payload.pubkey === 'string' ? payload.pubkey.trim() : '';
+    const privkey = payload && typeof payload.privkey === 'string' ? payload.privkey.trim() : '';
+
+    let pubkeyHex = '';
+    let pubkeyEpub = '';
+    try {
+      if (rawPub && eventstoreKeyLib) {
+        if (rawPub.startsWith('epub1') && typeof eventstoreKeyLib.epubDecode === 'function') {
+          const decoded = eventstoreKeyLib.epubDecode(rawPub);
+          pubkeyHex = typeof decoded === 'string' ? decoded : (decoded && decoded.data) || '';
+          pubkeyEpub = rawPub;
+        } else {
+          // 认为是 hex，尽量转成 epub
+          pubkeyHex = rawPub;
+          if (typeof eventstoreKeyLib.epubEncode === 'function') {
+            pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
+          }
+        }
+      }
+    } catch (_) {
+      // 出错时只保存原始字符串到 epub 字段，hex 留空
+      pubkeyEpub = rawPub;
+    }
+
+    const toSave = {
+      pubkeyHex,
+      pubkeyEpub,
+      // 兼容旧字段，保留 pubkey 为 hex
+      pubkey: pubkeyHex,
+      privkey,
+    };
+    fs.writeFileSync(IDENTITY_FILE, JSON.stringify(toSave, null, 2), 'utf8');
+    return { ok: true, pubkeyHex, pubkeyEpub };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+// 生成新的 ESEC 密钥对，并返回 { esec, pubkeyHex, epub }
+ipcMain.handle('identity:generate', async () => {
+  try {
+    if (!eventstoreKeyLib) {
+      // 延迟加载，避免启动时硬依赖失败
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      eventstoreKeyLib = require('eventstore-tools/src/key');
+    }
+    const { generateSecretKey, getPublicKey, esecEncode, epubEncode } = eventstoreKeyLib;
+    const privBytes = generateSecretKey();
+    const pubkeyHex = getPublicKey(privBytes);
+    const esec = esecEncode(privBytes);
+    const epub = epubEncode(pubkeyHex);
+
+    fs.mkdirSync(MARKWRITE_CFG_DIR, { recursive: true });
+    fs.writeFileSync(
+      IDENTITY_FILE,
+      JSON.stringify({ pubkeyHex, pubkeyEpub: epub, pubkey: pubkeyHex, privkey: esec }, null, 2),
+      'utf8',
+    );
+
+    return { ok: true, esec, pubkeyHex, epub };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+// 从 ESEC 推导公钥（hex + epub），供前端在粘贴时即时计算展示
+ipcMain.handle('identity:deriveFromEsec', async (_event, esec) => {
+  try {
+    if (!eventstoreKeyLib) {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      eventstoreKeyLib = require('eventstore-tools/src/key');
+    }
+    const { esecDecode, getPublicKey, epubEncode } = eventstoreKeyLib;
+    const v = typeof esec === 'string' ? esec.trim() : '';
+    if (!v || !v.startsWith('esec')) return { ok: false, message: 'invalid esec' };
+    const decoded = esecDecode(v);
+    const privBytes = (decoded && (decoded.data || decoded)) || decoded;
+    const pubkeyHex = getPublicKey(privBytes);
+    const pubkeyEpub = epubEncode(pubkeyHex);
+    return { ok: true, pubkeyHex, pubkeyEpub };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+// 从当前配置的同步服务器拉取用户 profile（老用户查是否有资料）
+ipcMain.handle('identity:fetchProfile', async () => {
+  try {
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeId = syncCfg.activeId || (servers[0] && servers[0].id) || null;
+    const activeServer = servers.find((s) => s.id === activeId) || servers[0];
+    const esserver = (activeServer && activeServer.esserver) || '';
+    if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+
+    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
+    if (fs.existsSync(IDENTITY_FILE)) {
+      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+      identity = JSON.parse(raw);
+    }
+    const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    const pubkey = pubkeyHex;
+    if (!pubkey) return { ok: false, message: '请先保存用户密钥' };
+
+    return await fetchEventstoreProfile(esserver, pubkey);
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+// 保存用户 profile 到当前同步服务器（新用户完善资料）
+ipcMain.handle('identity:saveProfile', async (_event, profile) => {
+  try {
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeServer = servers.find((s) => s.id === syncCfg.activeId) || servers[0];
+    const esserver = (activeServer && activeServer.esserver) || '';
+    if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+
+    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
+    if (fs.existsSync(IDENTITY_FILE)) {
+      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+      identity = JSON.parse(raw);
+    }
+    const pubkey = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    const privkey = (identity.privkey && identity.privkey.trim()) || '';
+    if (!pubkey || !privkey) return { ok: false, message: '请先保存用户密钥（含 ESEC）' };
+
+    const payload = typeof profile === 'object' && profile !== null ? profile : {};
+    return await saveEventstoreProfile(esserver, pubkey, privkey, payload);
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }

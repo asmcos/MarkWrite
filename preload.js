@@ -45,6 +45,13 @@ contextBridge.exposeInMainWorld('markwrite', {
     windowClose: () => ipcRenderer.invoke('app:window:close'),
     syncGetConfig: () => ipcRenderer.invoke('sync:getConfig'),
     syncSaveConfig: (cfg) => ipcRenderer.invoke('sync:saveConfig', cfg),
+    identityGet: () => ipcRenderer.invoke('identity:get'),
+    identitySave: (cfg) => ipcRenderer.invoke('identity:save', cfg),
+    identityGenerate: () => ipcRenderer.invoke('identity:generate'),
+    identityDeriveFromEsec: (esec) => ipcRenderer.invoke('identity:deriveFromEsec', esec),
+    identityFetchProfile: () => ipcRenderer.invoke('identity:fetchProfile'),
+    identitySaveProfile: (profile) => ipcRenderer.invoke('identity:saveProfile', profile),
+    clipboardWriteText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   },
 });
 
