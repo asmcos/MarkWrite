@@ -4,7 +4,8 @@
   "description": "MarkWrite - A local-first Markdown desktop app with AI-assisted writing, built on Electron.",
   "main": "main.js",
   "scripts": {
-    "start": "ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
+    "build:tailwind": "npx @tailwindcss/cli -i tailwind.input.css -o tailwind.output.css --minify",
+    "start": "npm run build:tailwind && ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
     "sync-preview-theme": "node scripts/sync-preview-theme.mjs",
     "update:openagent": "npm install git+https://github.com/asmcos/openagent.git --save-dev"
   },
@@ -35,7 +36,11 @@
   "devDependencies": {
     "@openagent/app": "file:./node_modules/openagent/packages/app",
     "@openagent/core": "file:./node_modules/openagent/packages/core",
+    "@tailwindcss/cli": "^4.2.2",
+    "autoprefixer": "^10.4.27",
     "electron": "^40.6.1",
-    "openagent": "git+https://github.com/asmcos/openagent.git"
+    "openagent": "git+https://github.com/asmcos/openagent.git",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.2"
   }
 }

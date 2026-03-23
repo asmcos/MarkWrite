@@ -615,6 +615,14 @@ ipcMain.handle('identity:save', async (_event, payload) => {
             pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
           }
         }
+      } else if (privkey && typeof eventstoreKeyLib.esecDecode === 'function' && typeof eventstoreKeyLib.getPublicKey === 'function') {
+        // 允许仅粘贴 ESEC：自动推导公钥
+        const decoded = eventstoreKeyLib.esecDecode(privkey);
+        const privBytes = (decoded && (decoded.data || decoded)) || decoded;
+        pubkeyHex = eventstoreKeyLib.getPublicKey(privBytes);
+        if (typeof eventstoreKeyLib.epubEncode === 'function') {
+          pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
+        }
       }
     } catch (_) {
       // 出错时只保存原始字符串到 epub 字段，hex 留空
@@ -635,7 +643,7 @@ ipcMain.handle('identity:save', async (_event, payload) => {
   }
 });
 
-// 生成新的 ESEC 密钥对，并返回 { esec, pubkeyHex, epub }
+// 生成新的 ESEC 密钥对，并返回 { esec, pubkeyHex, epub }（不自动写入磁盘）
 ipcMain.handle('identity:generate', async () => {
   try {
     if (!eventstoreKeyLib) {
@@ -648,13 +656,6 @@ ipcMain.handle('identity:generate', async () => {
     const pubkeyHex = getPublicKey(privBytes);
     const esec = esecEncode(privBytes);
     const epub = epubEncode(pubkeyHex);
-
-    fs.mkdirSync(MARKWRITE_CFG_DIR, { recursive: true });
-    fs.writeFileSync(
-      IDENTITY_FILE,
-      JSON.stringify({ pubkeyHex, pubkeyEpub: epub, pubkey: pubkeyHex, privkey: esec }, null, 2),
-      'utf8',
-    );
 
     return { ok: true, esec, pubkeyHex, epub };
   } catch (e) {
