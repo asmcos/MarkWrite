@@ -134,34 +134,81 @@
     box-shadow: 0 2px 6px rgba(0,0,0,0.2);
   }
   
-  /* ========== 用户信息卡片样式 ========== */
+  /* ========== 用户信息：顶部居中大头 + 下方表单 ========== */
   #settings-identity-profile-form-wrap {
-    max-width: 720px;
+    max-width: 520px;
     margin: 0 auto;
-    background: rgba(15, 25, 35, 0.75);
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(100, 120, 140, 0.4);
+    background: linear-gradient(165deg, rgba(18, 32, 48, 0.92), rgba(15, 23, 35, 0.88));
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(100, 130, 160, 0.35);
     border-radius: 1.5rem;
-    padding: 1.5rem;
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 24px 48px -16px rgba(0, 0, 0, 0.45);
+  }
+  .profile-form-card {
+    padding: 0;
+  }
+  .profile-form-hero {
+    text-align: center;
+    padding: 2rem 1.5rem 1.5rem;
+    background: linear-gradient(180deg, rgba(30, 58, 95, 0.35) 0%, rgba(15, 23, 35, 0.2) 55%, transparent 100%);
+    border-bottom: 1px solid rgba(71, 85, 105, 0.35);
+  }
+  .profile-form-avatar-ring {
+    display: inline-flex;
+    padding: 4px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.55), rgba(59, 130, 246, 0.25), rgba(15, 23, 42, 0.8));
+    box-shadow: 0 12px 40px rgba(37, 99, 235, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+  #settings-profile-avatar-preview.profile-form-avatar-preview--hero {
+    width: 132px;
+    height: 132px;
+    margin: 0 auto;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle at 35% 30%, rgba(71, 85, 105, 0.5), rgba(15, 23, 42, 0.95));
+    border: 2px solid rgba(30, 41, 59, 0.9);
+    box-sizing: border-box;
+  }
+  #settings-profile-avatar-preview.profile-form-avatar-preview--hero:empty {
+    background: radial-gradient(circle at 35% 30%, rgba(71, 85, 105, 0.45), rgba(15, 23, 42, 0.98));
+  }
+  #settings-profile-avatar-preview.profile-form-avatar-preview--hero img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    border-radius: 50%;
+  }
+  .profile-form-hero-text {
+    margin-top: 1.25rem;
+    max-width: 22rem;
+    margin-left: auto;
+    margin-right: auto;
   }
   .profile-form-header {
-    margin-bottom: 1.5rem;
+    margin-bottom: 0;
   }
   .profile-form-title {
-    font-size: 1.4rem;
+    font-size: 1.35rem;
     font-weight: 600;
-    color: #eef4ff;
-    margin: 0 0 0.25rem;
+    color: #f1f5f9;
+    margin: 0 0 0.35rem;
+    letter-spacing: -0.02em;
   }
   .profile-form-subtitle {
     font-size: 0.85rem;
-    color: #8ba0b5;
+    color: #94a3b8;
     margin: 0;
+    line-height: 1.45;
   }
   .profile-form-body {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 1.1rem;
+    padding: 1.5rem 1.5rem 1.75rem;
   }
   .profile-form-field {
     display: flex;
@@ -175,36 +222,80 @@
   }
   .profile-form-input,
   .profile-form-textarea {
+    width: 100%;
     background: #0f1a24;
     border: 1px solid #2a3a48;
     border-radius: 0.75rem;
     padding: 0.6rem 0.9rem;
     color: #eef4ff;
     font-size: 0.9rem;
+    box-sizing: border-box;
   }
   .profile-form-input:focus,
   .profile-form-textarea:focus {
     outline: none;
     border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
   }
   .profile-form-textarea {
     resize: vertical;
+    min-height: 5rem;
   }
-  .profile-form-avatar-preview {
-    margin-top: 0.5rem;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    background: #1a2a36;
-    background-size: cover;
-    background-position: center;
-    border: 1px solid #2e4a62;
+  .profile-form-keys-block {
+    border-top: 1px solid rgba(71, 85, 105, 0.35);
+    padding: 1.25rem 1.5rem 1.5rem;
+    background: rgba(0, 0, 0, 0.18);
+  }
+  .profile-form-keys-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #94a3b8;
+    margin: 0 0 0.35rem;
+    letter-spacing: 0.04em;
+  }
+  .profile-form-keys-desc {
+    font-size: 0.75rem;
+    color: #64748b;
+    margin: 0 0 1rem;
+    line-height: 1.45;
+  }
+  .profile-form-key-row {
+    margin-bottom: 1rem;
+  }
+  .profile-form-key-row:last-child {
+    margin-bottom: 0;
+  }
+  .profile-form-key-row-inner {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+  }
+  .profile-form-key-readonly {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: #cbd5e1;
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(51, 65, 85, 0.6);
+    border-radius: 0.5rem;
+    padding: 0.5rem 0.65rem;
+    resize: none;
+    box-sizing: border-box;
+  }
+  .profile-form-keys-warn {
+    font-size: 0.72rem;
+    color: #fbbf24;
+    margin: 0.15rem 0 0.35rem;
+    opacity: 0.95;
   }
   .profile-form-actions {
     display: flex;
     justify-content: flex-end;
-    gap: 1rem;
-    margin-top: 1rem;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+    padding-top: 0.25rem;
   }
   
   /* 保持原有按钮样式（与全局一致） */
@@ -237,21 +328,33 @@
   }
   </style>
   
-  <div class="settings-nav">
+  <nav class="settings-nav" aria-label="设置分类">
     <div class="settings-nav-group">
       <div class="settings-nav-title">Sync</div>
-      <button type="button" class="settings-tab active" data-tab="sync">Sync &amp; Servers</button>
+      <button type="button" class="settings-tab active" data-tab="sync">
+        <i class="bi bi-hdd-network settings-tab-icon" aria-hidden="true"></i>
+        <span class="settings-tab-label">Sync &amp; Servers</span>
+      </button>
     </div>
     <div class="settings-nav-group">
       <div class="settings-nav-title">Workspace</div>
-      <button type="button" class="settings-tab" data-tab="workspace">Current Workspace</button>
+      <button type="button" class="settings-tab" data-tab="workspace">
+        <i class="bi bi-folder2-open settings-tab-icon" aria-hidden="true"></i>
+        <span class="settings-tab-label">Current Workspace</span>
+      </button>
     </div>
     <div class="settings-nav-group">
       <div class="settings-nav-title">用户</div>
-      <button type="button" class="settings-tab" data-tab="identity-login">登录/注册</button>
-      <button type="button" class="settings-tab" data-tab="identity-profile">用户信息</button>
+      <button type="button" class="settings-tab" data-tab="identity-login">
+        <i class="bi bi-key settings-tab-icon" aria-hidden="true"></i>
+        <span class="settings-tab-label">登录 / 注册</span>
+      </button>
+      <button type="button" class="settings-tab" data-tab="identity-profile">
+        <i class="bi bi-person-vcard settings-tab-icon" aria-hidden="true"></i>
+        <span class="settings-tab-label">用户信息</span>
+      </button>
     </div>
-  </div>
+  </nav>
   <div class="settings-panels">
     <div class="settings-panel" data-tab-panel="sync">
       <div class="settings-section-title">Sync & Servers</div>
@@ -357,41 +460,57 @@
         <div class="settings-sync-actions settings-identity-actions-row mt-4 !justify-end">
           <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-identity-generate-main-btn">生成新用户密钥</button>
           <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-identity-save-btn">使用此 ESEC 登录</button>
+          <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-identity-logout-btn" style="display:none;" title="清除本地密钥">退出登录</button>
         </div>
       </div>
     </div>
     <div class="settings-panel" data-tab-panel="identity-profile" style="display:none;">
       <div class="settings-identity-profile-form-wrap" id="settings-identity-profile-form-wrap">
         <div class="profile-form-card">
-          <div class="profile-form-header">
-            <h2 class="profile-form-title">个人资料设置</h2>
-            <p class="profile-form-subtitle">自定义您的个人主页展示</p>
+          <div class="profile-form-hero">
+            <div class="profile-form-avatar-ring" aria-hidden="true">
+              <div id="settings-profile-avatar-preview" class="profile-form-avatar-preview profile-form-avatar-preview--hero"></div>
+            </div>
+            <div class="profile-form-hero-text">
+              <h2 class="profile-form-title">个人资料</h2>
+              <p class="profile-form-subtitle">头像来自服务器已保存的资料（若已设置）；填写名称与简介后保存，将同步到 EventStore 个人主页</p>
+            </div>
           </div>
           <div class="profile-form-body">
             <div class="profile-form-field">
-              <label class="profile-form-label">用户名</label>
+              <label class="profile-form-label" for="settings-profile-name">显示名称</label>
               <input id="settings-profile-name" type="text" class="profile-form-input" placeholder="显示名称" maxlength="32" />
             </div>
             <div class="profile-form-field">
-              <label class="profile-form-label">公钥（epub）</label>
-              <input id="settings-profile-pubkey" type="text" class="profile-form-input" readonly />
-            </div>
-            <div class="profile-form-field">
-              <label class="profile-form-label">职业</label>
+              <label class="profile-form-label" for="settings-profile-title">职业 / 头衔</label>
               <input id="settings-profile-title" type="text" class="profile-form-input" placeholder="选填，如：开发者" maxlength="20" />
             </div>
             <div class="profile-form-field">
-              <label class="profile-form-label">头像 URL</label>
-              <input id="settings-profile-avatar" type="text" class="profile-form-input" placeholder="https://..." />
-              <div class="profile-form-avatar-preview" id="settings-profile-avatar-preview"></div>
-            </div>
-            <div class="profile-form-field">
-              <label class="profile-form-label">个人简介</label>
+              <label class="profile-form-label" for="settings-profile-bio">个人简介</label>
               <textarea id="settings-profile-bio" class="profile-form-textarea" rows="4" placeholder="介绍一下自己，让读者更了解您…"></textarea>
             </div>
             <div class="profile-form-actions">
               <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-profile-back-btn">返回</button>
               <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="settings-profile-save-btn">保存到服务器</button>
+            </div>
+          </div>
+          <div class="profile-form-keys-block">
+            <div class="profile-form-keys-title">身份密钥（只读）</div>
+            <p class="profile-form-keys-desc">公钥与 ESEC 私钥由「登录 / 注册」页决定，不可在此修改；备份或迁移时请复制到安全位置。</p>
+            <div class="profile-form-key-row">
+              <label class="profile-form-label" for="settings-profile-pubkey-display">公钥（epub）</label>
+              <div class="profile-form-key-row-inner">
+                <textarea id="settings-profile-pubkey-display" class="profile-form-key-readonly" rows="2" readonly spellcheck="false" autocomplete="off"></textarea>
+                <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-profile-copy-pubkey">复制</button>
+              </div>
+            </div>
+            <div class="profile-form-key-row">
+              <label class="profile-form-label" for="settings-profile-privkey-display">ESEC 私钥</label>
+              <p class="profile-form-keys-warn">请勿泄露给他人；获得私钥即可代表您登录。</p>
+              <div class="profile-form-key-row-inner">
+                <textarea id="settings-profile-privkey-display" class="profile-form-key-readonly" rows="3" readonly spellcheck="false" autocomplete="off"></textarea>
+                <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="settings-profile-copy-privkey">复制</button>
+              </div>
             </div>
           </div>
         </div>

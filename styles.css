@@ -259,6 +259,46 @@ body {
   justify-content: flex-end;
   gap: 10px;
 }
+
+/* 叠在 Settings 弹窗之上，替代 window.confirm，避免原生对话框导致整窗失焦 */
+.settings-inline-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 12100;
+  padding: 24px;
+}
+.settings-inline-confirm-box {
+  width: min(420px, 100%);
+  border-radius: 12px;
+  padding: 16px 16px 14px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  color: #e5e7eb;
+}
+.settings-inline-confirm-title {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  margin-bottom: 8px;
+}
+.settings-inline-confirm-desc {
+  font-size: 12px;
+  color: rgba(229, 231, 235, 0.85);
+  line-height: 1.55;
+  margin-bottom: 16px;
+  white-space: pre-line;
+}
+.settings-inline-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
 .apply-editor-btn {
   appearance: none;
   border: 1px solid rgba(148, 163, 184, 0.25);
@@ -340,37 +380,74 @@ body {
   font-size: 12px;
 }
 .settings-nav {
-  padding-right: 8px;
-  border-right: 1px solid rgba(31, 41, 55, 0.9);
+  padding-right: 10px;
+  border-right: 1px solid rgba(31, 41, 55, 0.75);
 }
 .settings-nav-group {
-  margin-bottom: 10px;
+  margin-bottom: 14px;
+}
+.settings-nav-group:last-child {
+  margin-bottom: 0;
 }
 .settings-nav-title {
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: #9ca3af;
-  margin-bottom: 4px;
+  letter-spacing: 0.1em;
+  color: #64748b;
+  margin-bottom: 6px;
+  padding-left: 2px;
 }
+/* 无框 + 图标：与 VS Code / Notion 等侧栏一致，选中用背景与左侧色条 */
 .settings-tab {
   width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
+  border: none;
   border-radius: 8px;
-  border: 1px solid rgba(55, 65, 81, 0.9);
-  padding: 5px 8px;
+  border-left: 3px solid transparent;
+  padding: 8px 8px 8px 7px;
   font-size: 11px;
-  background: rgba(15, 23, 42, 0.95);
-  color: #9ca3af;
+  line-height: 1.3;
+  background: transparent;
+  color: #94a3b8;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.settings-tab-icon {
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.88;
+  flex-shrink: 0;
+  color: #64748b;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+.settings-tab-label {
+  flex: 1;
+  min-width: 0;
+}
+.settings-tab:hover {
+  background: rgba(51, 65, 85, 0.35);
+  color: #e2e8f0;
+}
+.settings-tab:hover .settings-tab-icon {
+  color: #94a3b8;
+  opacity: 1;
 }
 .settings-tab + .settings-tab {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .settings-tab.active {
-  background: radial-gradient(circle at top left, rgba(59, 130, 246, 0.5), rgba(15, 23, 42, 0.98));
-  border-color: rgba(59, 130, 246, 0.9);
-  color: #e5e7eb;
+  background: rgba(37, 99, 235, 0.14);
+  border-left-color: #3b82f6;
+  color: #f1f5f9;
+  font-weight: 500;
+}
+.settings-tab.active .settings-tab-icon {
+  color: #60a5fa;
+  opacity: 1;
 }
 .settings-panels {
   flex: 1;
@@ -660,81 +737,17 @@ body {
 .identity-mode-tab:hover {
   border-color: rgba(59, 130, 246, 0.35);
 }
-/* 个人资料表单卡片（参考 eventstoreUI profile 页） */
-.settings-identity-profile-form-wrap {
-  margin-top: 0;
-  padding-top: 0;
-}
-.profile-form-card {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.profile-form-header {
-  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
-  padding: 14px 16px;
-}
-.profile-form-title {
-  margin: 0 0 4px 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #e5e7eb;
-}
-.profile-form-subtitle {
-  margin: 0;
-  font-size: 12px;
-  color: #94a3b8;
-}
-.profile-form-body {
-  padding: 16px;
-}
-.profile-form-field {
-  margin-bottom: 14px;
-}
-.profile-form-label {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  color: #94a3b8;
-  margin-bottom: 6px;
-}
-.profile-form-input,
-.profile-form-textarea {
-  width: 100%;
-  max-width: 320px;
-  box-sizing: border-box;
-  border-radius: 8px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  background: rgba(15, 23, 42, 0.96);
-  color: #e5e7eb;
-  font-size: 13px;
-  padding: 8px 10px;
-}
-.profile-form-textarea {
+/* 个人资料：主样式在 settings-modal.html 内联；此处仅兜底避免旧规则挤压布局 */
+#settings-identity-profile-form-wrap .profile-form-input,
+#settings-identity-profile-form-wrap .profile-form-textarea {
   max-width: 100%;
-  min-height: 80px;
-  resize: vertical;
 }
-.profile-form-avatar-preview {
-  margin-top: 6px;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px dashed rgba(148, 163, 184, 0.4);
-  overflow: hidden;
-}
-.profile-form-avatar-preview img {
+#settings-identity-profile-form-wrap .profile-form-avatar-preview--hero img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-}
-.profile-form-actions {
-  margin-top: 18px;
-  display: flex;
-  gap: 10px;
-  justify-content: flex-start;
+  border-radius: 50%;
+  display: block;
 }
 .table-size-overlay {
   position: fixed;
@@ -1673,77 +1686,7 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
   justify-content: flex-end;
   gap: 1rem;
 }
-#settings-identity-profile-form-wrap {
-  max-width: 720px;
-  margin: 0 auto;
-  background: rgba(15, 25, 35, 0.75);
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(100, 120, 140, 0.4);
-  border-radius: 1.5rem;
-  padding: 1.5rem;
-}
-.profile-form-header {
-  margin-bottom: 1.5rem;
-}
-.profile-form-title {
-  font-size: 1.4rem;
-  font-weight: 600;
-  color: #eef4ff;
-  margin: 0 0 0.25rem;
-}
-.profile-form-subtitle {
-  font-size: 0.85rem;
-  color: #8ba0b5;
-  margin: 0;
-}
-.profile-form-body {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-.profile-form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-.profile-form-label {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: #cbd5e6;
-}
-.profile-form-input,
-.profile-form-textarea {
-  background: #0f1a24;
-  border: 1px solid #2a3a48;
-  border-radius: 0.75rem;
-  padding: 0.6rem 0.9rem;
-  color: #eef4ff;
-  font-size: 0.9rem;
-}
-.profile-form-input:focus,
-.profile-form-textarea:focus {
-  outline: none;
-  border-color: #3b82f6;
-}
-.profile-form-textarea {
-  resize: vertical;
-}
-.profile-form-avatar-preview {
-  margin-top: 0.5rem;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: #1a2a36;
-  background-size: cover;
-  background-position: center;
-  border: 1px solid #2e4a62;
-}
-.profile-form-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 1rem;
-  margin-top: 1rem;
-}
+/* 个人资料页：见 settings-modal.html 内联样式（顶部大头 + 表单） */
 .apply-editor-btn-primary {
   background: #2563eb;
   border: none;

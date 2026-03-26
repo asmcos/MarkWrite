@@ -23,7 +23,11 @@ let workspaceChangeTimer = null;
 let mainWindow = null;
 
 const { render: renderMarkdown } = require('./md-renderer.js');
-const { fetchProfile: fetchEventstoreProfile, saveProfile: saveEventstoreProfile } = require('./lib/eventstore-profile.js');
+const {
+  fetchProfile: fetchEventstoreProfile,
+  saveProfile: saveEventstoreProfile,
+  registerUserOnServer,
+} = require('./lib/eventstore-profile.js');
 
 function createServer() {
   const mime = {
@@ -600,33 +604,54 @@ ipcMain.handle('identity:save', async (_event, payload) => {
     const rawPub = payload && typeof payload.pubkey === 'string' ? payload.pubkey.trim() : '';
     const privkey = payload && typeof payload.privkey === 'string' ? payload.privkey.trim() : '';
 
+    // 退出登录：清空 pubkey+privkey 时直接删除文件，避免残留空 JSON 导致前端/状态不一致
+    if (!rawPub && !privkey) {
+      try {
+        if (fs.existsSync(IDENTITY_FILE)) fs.unlinkSync(IDENTITY_FILE);
+      } catch (_) {}
+      return { ok: true, pubkeyHex: '', pubkeyEpub: '' };
+    }
+
     let pubkeyHex = '';
     let pubkeyEpub = '';
-    try {
-      if (rawPub && eventstoreKeyLib) {
-        if (rawPub.startsWith('epub1') && typeof eventstoreKeyLib.epubDecode === 'function') {
-          const decoded = eventstoreKeyLib.epubDecode(rawPub);
-          pubkeyHex = typeof decoded === 'string' ? decoded : (decoded && decoded.data) || '';
-          pubkeyEpub = rawPub;
-        } else {
-          // 认为是 hex，尽量转成 epub
-          pubkeyHex = rawPub;
-          if (typeof eventstoreKeyLib.epubEncode === 'function') {
-            pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
-          }
-        }
-      } else if (privkey && typeof eventstoreKeyLib.esecDecode === 'function' && typeof eventstoreKeyLib.getPublicKey === 'function') {
-        // 允许仅粘贴 ESEC：自动推导公钥
+
+    if (privkey) {
+      if (!privkey.startsWith('esec')) {
+        return { ok: false, message: 'ESEC 密钥应以 esec 开头' };
+      }
+      try {
         const decoded = eventstoreKeyLib.esecDecode(privkey);
         const privBytes = (decoded && (decoded.data || decoded)) || decoded;
         pubkeyHex = eventstoreKeyLib.getPublicKey(privBytes);
         if (typeof eventstoreKeyLib.epubEncode === 'function') {
           pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
         }
+      } catch (e) {
+        return { ok: false, message: '无效的 ESEC 密钥，无法解析' };
       }
-    } catch (_) {
-      // 出错时只保存原始字符串到 epub 字段，hex 留空
-      pubkeyEpub = rawPub;
+      if (!pubkeyHex) {
+        return { ok: false, message: '无效的 ESEC 密钥' };
+      }
+    } else if (rawPub) {
+      try {
+        if (rawPub.startsWith('epub1') && typeof eventstoreKeyLib.epubDecode === 'function') {
+          const decoded = eventstoreKeyLib.epubDecode(rawPub);
+          pubkeyHex = typeof decoded === 'string' ? decoded : (decoded && decoded.data) || '';
+          pubkeyEpub = rawPub;
+        } else {
+          pubkeyHex = rawPub;
+          if (typeof eventstoreKeyLib.epubEncode === 'function') {
+            pubkeyEpub = eventstoreKeyLib.epubEncode(pubkeyHex);
+          }
+        }
+      } catch (e) {
+        return { ok: false, message: '无效的公钥格式' };
+      }
+      if (!pubkeyHex && !pubkeyEpub) {
+        return { ok: false, message: '无效的公钥格式' };
+      }
+    } else {
+      return { ok: false, message: '请填写 ESEC 密钥' };
     }
 
     const toSave = {
@@ -709,6 +734,44 @@ ipcMain.handle('identity:fetchProfile', async () => {
     if (!pubkey) return { ok: false, message: '请先保存用户密钥' };
 
     return await fetchEventstoreProfile(esserver, pubkey);
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+/**
+ * 本地身份已写入后：按当前 Sync 配置的 esserver 调用与 eventstoreUI create_user 相同的注册（code 100）。
+ * payload: { email?: string }
+ */
+ipcMain.handle('identity:registerOnServer', async (_event, payload) => {
+  try {
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeServer = servers.find((s) => s.id === syncCfg.activeId) || servers[0];
+    const esserver = (activeServer && activeServer.esserver) || '';
+    if (!esserver) {
+      return { ok: true, skipped: true, message: '未配置 EventStore WebSocket，已跳过服务器注册' };
+    }
+
+    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
+    if (fs.existsSync(IDENTITY_FILE)) {
+      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+      identity = JSON.parse(raw);
+    }
+    const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    const privkey = (identity.privkey && identity.privkey.trim()) || '';
+    if (!pubkeyHex || !privkey) {
+      return { ok: false, message: '本地身份不完整，无法向服务器注册' };
+    }
+
+    const email = payload && typeof payload.email === 'string' ? payload.email.trim() : '';
+    return await registerUserOnServer(esserver, email, pubkeyHex, privkey);
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }

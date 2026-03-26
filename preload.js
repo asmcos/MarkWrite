@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('markwrite', {
     identityDeriveFromEsec: (esec) => ipcRenderer.invoke('identity:deriveFromEsec', esec),
     identityFetchProfile: () => ipcRenderer.invoke('identity:fetchProfile'),
     identitySaveProfile: (profile) => ipcRenderer.invoke('identity:saveProfile', profile),
+    /** 与 eventstoreUI create_user（code 100）一致，向当前 Sync 的 esserver 注册用户 */
+    identityRegisterOnServer: (payload) => ipcRenderer.invoke('identity:registerOnServer', payload),
     clipboardWriteText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
   },
 });

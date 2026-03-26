@@ -21,6 +21,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     } catch (_) {}
   }
 
+  // 身份页状态必须在任何使用它们的函数之前声明（避免 let TDZ / 闭包读到未初始化变量）
+  let currentSettingsTab = 'sync';
+  let identityHasExisting = false;
+  let lastDerivedEsec = '';
+  let identityLoginMode = 'paste'; // 'paste' | 'new'
+  let identityPrefillNonce = 0;
+  /** 服务器 profile 中的头像 URL，保存时原样写回（本页不再提供头像 URL 输入） */
+  let profileServerAvatarUrl = '';
+
   const PREVIEW_THEME_CSS = [
     'base.css',
     'vars.css',
@@ -68,16 +77,13 @@ window.addEventListener('DOMContentLoaded', async () => {
   const settingsSaveBtn = document.getElementById('settings-save-btn'); // 全局 footer 目前隐藏，仅保留兼容
   const settingsSyncSaveBtn = document.getElementById('settings-sync-save-btn');
   const settingsSyncCancelBtn = document.getElementById('settings-sync-cancel-btn');
-  const settingsIdentityPub = document.getElementById('settings-identity-pubkey');
-  const settingsIdentityPriv = document.getElementById('settings-identity-privkey');
   const settingsIdentityEmptyHint = document.getElementById('settings-identity-empty-hint');
   const settingsIdentityModePasteBtn = document.getElementById('settings-identity-mode-paste-btn');
   const settingsIdentityModeNewBtn = document.getElementById('settings-identity-mode-new-btn');
   const settingsIdentityEmailWrap = document.getElementById('settings-identity-email-wrap');
-  const settingsIdentityEmailInput = document.getElementById('settings-identity-email');
-  const identityModeTabsEl = document.querySelector('.identity-mode-tabs');
   const settingsIdentityGenerateMainBtn = document.getElementById('settings-identity-generate-main-btn');
   const settingsIdentitySaveBtn = document.getElementById('settings-identity-save-btn');
+  const settingsIdentityLogoutBtn = document.getElementById('settings-identity-logout-btn');
   const settingsIdentityProfileBlock = document.getElementById('settings-identity-profile-block');
   const settingsIdentityProfileLoading = document.getElementById('settings-identity-profile-loading');
   const settingsIdentityProfileHas = document.getElementById('settings-identity-profile-has');
@@ -89,9 +95,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const settingsIdentityProfileFormWrap = document.getElementById('settings-identity-profile-form-wrap');
   const settingsIdentityKeySection = document.getElementById('settings-identity-key-section');
   const settingsProfileNameInput = document.getElementById('settings-profile-name');
-  const settingsProfilePubkeyInput = document.getElementById('settings-profile-pubkey');
   const settingsProfileTitleInput = document.getElementById('settings-profile-title');
-  const settingsProfileAvatarInput = document.getElementById('settings-profile-avatar');
   const settingsProfileBioInput = document.getElementById('settings-profile-bio');
   const settingsProfileAvatarPreview = document.getElementById('settings-profile-avatar-preview');
   const settingsProfileSaveBtn = document.getElementById('settings-profile-save-btn');
@@ -169,6 +173,128 @@ window.addEventListener('DOMContentLoaded', async () => {
     cancelBtn.addEventListener('click', () => close(false));
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
   }
+
+  /** 关闭页内弹层后恢复焦点，避免 Electron 原生 alert/confirm 抢焦点 */
+  function restoreFocusAfterAppDialog() {
+    requestAnimationFrame(() => {
+      try {
+        const settingsOverlay = document.getElementById('settings-overlay');
+        if (settingsOverlay && settingsOverlay.style.display !== 'none') {
+          const closeBtn = document.getElementById('settings-close-btn');
+          if (closeBtn) closeBtn.focus();
+          return;
+        }
+        if (typeof editor !== 'undefined' && editor && typeof editor.focus === 'function') {
+          editor.focus();
+        }
+      } catch (_) {}
+    });
+  }
+
+  /**
+   * 应用内统一弹层（替代 alert / confirm），z-index 高于 Settings
+   * @param {{ title?: string, message?: string, showCancel?: boolean, confirmText?: string, cancelText?: string, onDone?: (confirmed: boolean) => void }} options
+   * showCancel=false 时等价于 alert，onDone 仅收到 true
+   */
+  function showAppModal(options) {
+    const {
+      title = '提示',
+      message = '',
+      showCancel = true,
+      confirmText = '确定',
+      cancelText = '取消',
+      onDone,
+    } = options || {};
+
+    const overlay = document.createElement('div');
+    overlay.className = 'settings-inline-confirm-overlay';
+    const box = document.createElement('div');
+    box.className = 'settings-inline-confirm-box';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    const titleEl = document.createElement('div');
+    titleEl.className = 'settings-inline-confirm-title';
+    titleEl.textContent = title;
+    const desc = document.createElement('div');
+    desc.className = 'settings-inline-confirm-desc';
+    desc.textContent = message || '';
+    const actions = document.createElement('div');
+    actions.className = 'settings-inline-confirm-actions';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'apply-editor-btn apply-editor-btn-secondary';
+    cancelBtn.textContent = cancelText;
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'apply-editor-btn apply-editor-btn-primary';
+    okBtn.textContent = confirmText;
+    if (showCancel) {
+      actions.appendChild(cancelBtn);
+    }
+    actions.appendChild(okBtn);
+    box.appendChild(titleEl);
+    box.appendChild(desc);
+    box.appendChild(actions);
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const finalize = (confirmed) => {
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.remove();
+      if (typeof onDone === 'function') {
+        onDone(showCancel ? !!confirmed : true);
+      }
+      restoreFocusAfterAppDialog();
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') finalize(showCancel ? false : true);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    okBtn.addEventListener('click', () => finalize(true));
+    if (showCancel) {
+      cancelBtn.addEventListener('click', () => finalize(false));
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) finalize(false); });
+    } else {
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) finalize(true); });
+    }
+    requestAnimationFrame(() => {
+      try { okBtn.focus(); } catch (_) {}
+    });
+  }
+
+  function showAppAlert(message, onClose) {
+    showAppModal({
+      title: '提示',
+      message: String(message || ''),
+      showCancel: false,
+      confirmText: '确定',
+      onDone: () => {
+        if (typeof onClose === 'function') onClose();
+      },
+    });
+  }
+
+  /** @param {(ok: boolean) => void} onDone */
+  function showAppConfirm(message, onDone, opts) {
+    const o = opts || {};
+    showAppModal({
+      title: o.title != null ? o.title : '确认',
+      message: String(message || ''),
+      showCancel: true,
+      confirmText: o.confirmText != null ? o.confirmText : '确定',
+      cancelText: o.cancelText != null ? o.cancelText : '取消',
+      onDone,
+    });
+  }
+
+  function showSettingsConfirm(message, onDone) {
+    showAppConfirm(message, onDone, {
+      title: '退出登录',
+      confirmText: '确定退出',
+      cancelText: '取消',
+    });
+  }
+
   let aiMode = 'chat';
   /** 用户手动选择的模式，null 表示由系统根据输入自动判断 */
   // ---- VSCode-like 布局：聊天宽度拖拽 + 文件侧栏收起/展开 ----
@@ -369,6 +495,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       const tabName = first.getAttribute('data-tab');
       switchSettingsTab(tabName || 'sync');
     }
+    // 避免 Monaco 仍持焦点导致按键进编辑器而非设置里的输入框
+    if (editor && typeof editor.blur === 'function') {
+      try { editor.blur(); } catch (_) {}
+    }
     // 从主进程加载 Sync & Servers 配置
     if (window.markwrite?.api?.syncGetConfig) {
       window.markwrite.api.syncGetConfig().then((cfg) => {
@@ -394,44 +524,41 @@ window.addEventListener('DOMContentLoaded', async () => {
       }).catch(() => {});
     }
     // 预填 Identity（可选）
-    if (window.markwrite?.api?.identityGet && (settingsIdentityPub || settingsIdentityPriv)) {
+    if (window.markwrite?.api?.identityGet) {
+      const nonce = ++identityPrefillNonce;
       window.markwrite.api.identityGet().then((id) => {
+        if (nonce !== identityPrefillNonce) return;
         if (!id) return;
         const hasPriv = !!(id.privkey && typeof id.privkey === 'string' && id.privkey.trim());
-        const hasPub = !!((id.pubkeyHex || id.pubkeyEpub || id.pubkey) && String(id.pubkeyHex || id.pubkeyEpub || id.pubkey).trim());
-        identityHasExisting = hasPriv || hasPub;
+        // 已登录仅当本地确实有私钥（privkey）时成立；
+        // 仅有公钥（pubkey/epub）但没有私钥时，仍应允许用户粘贴 ESEC。
+        identityHasExisting = hasPriv;
         const displayPub = id.pubkeyEpub || id.pubkey || id.pubkeyHex || '';
-        if (settingsIdentityPub) settingsIdentityPub.value = displayPub;
-        if (settingsIdentityPriv) {
-          settingsIdentityPriv.value = id.privkey || '';
-          // 已存在用户时，只允许复制/查看，不再让用户在此页“切换登录”
-          settingsIdentityPriv.readOnly = identityHasExisting;
+        const pubEl = document.getElementById('settings-identity-pubkey');
+        const privEl = document.getElementById('settings-identity-privkey');
+        if (pubEl) pubEl.value = displayPub;
+        if (privEl) {
+          privEl.value = id.privkey || '';
         }
         if (settingsIdentityEmptyHint) {
           settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
         }
-        if (settingsIdentityGenerateMainBtn) {
-          settingsIdentityGenerateMainBtn.style.display = identityHasExisting ? 'none' : 'inline-flex';
-        }
-        if (settingsIdentitySaveBtn) {
-          settingsIdentitySaveBtn.textContent = identityHasExisting ? '退出登录' : '使用此 ESEC 登录';
-        }
-        identityLoginMode = 'paste';
+        // 异步 identityGet 晚到时不应覆盖用户已点的「新用户（邮箱）」；已登录则必须回到粘贴态（隐藏邮箱行）
+        if (identityHasExisting) identityLoginMode = 'paste';
+        else if (identityLoginMode !== 'new') identityLoginMode = 'paste';
         applyIdentityLoginMode();
+        if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
       }).catch(() => {
+        if (nonce !== identityPrefillNonce) return;
         identityHasExisting = false;
         if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
-        if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '使用此 ESEC 登录';
-        if (settingsIdentityPriv) settingsIdentityPriv.readOnly = false;
-        identityLoginMode = 'paste';
+        if (identityLoginMode !== 'new') identityLoginMode = 'paste';
         applyIdentityLoginMode();
       });
     } else if (settingsIdentityEmptyHint) {
       identityHasExisting = false;
       settingsIdentityEmptyHint.style.display = 'block';
-      if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '使用此 ESEC 登录';
-      if (settingsIdentityPriv) settingsIdentityPriv.readOnly = false;
-      identityLoginMode = 'paste';
+      if (identityLoginMode !== 'new') identityLoginMode = 'paste';
       applyIdentityLoginMode();
     }
   }
@@ -441,22 +568,38 @@ window.addEventListener('DOMContentLoaded', async () => {
     settingsOverlay.style.display = 'none';
   }
 
-  let currentSettingsTab = 'sync';
-  let identityHasExisting = false;
-  let lastDerivedEsec = '';
-  let identityLoginMode = 'paste'; // 'paste' | 'new'
-
   function applyIdentityLoginMode() {
-    if (identityModeTabsEl) {
-      identityModeTabsEl.style.display = identityHasExisting ? 'none' : 'flex';
+    // 必须每次从 DOM 取节点：settings 内容异步注入后，缓存的 const 可能为 null，导致改的是“空引用”，页面上输入框永远被锁
+    const privEl = document.getElementById('settings-identity-privkey');
+    const emailEl = document.getElementById('settings-identity-email');
+    const emailWrapEl = document.getElementById('settings-identity-email-wrap');
+    const modeTabsElLive = document.querySelector('.identity-mode-tabs');
+
+    if (modeTabsElLive) {
+      modeTabsElLive.style.display = identityHasExisting ? 'none' : 'flex';
     }
 
-    // 根据登录状态控制输入能力：已登录时禁止编辑，只允许复制/查看
-    if (settingsIdentityPriv) settingsIdentityPriv.readOnly = identityHasExisting;
-    if (settingsIdentityEmailInput) settingsIdentityEmailInput.readOnly = identityHasExisting;
+    // 邮箱 / ESEC 始终可编辑，不再用 readOnly 按登录态锁定（避免各种异步竞态导致“不能输入”）
+    if (privEl) {
+      privEl.readOnly = false;
+      privEl.removeAttribute('readonly');
+      privEl.removeAttribute('disabled');
+    }
+    if (emailEl) {
+      emailEl.readOnly = false;
+      emailEl.removeAttribute('readonly');
+      emailEl.removeAttribute('disabled');
+    }
 
+    
     const isNew = identityLoginMode === 'new';
-    if (settingsIdentityEmailWrap) settingsIdentityEmailWrap.style.display = isNew ? 'flex' : 'none';
+    if (privEl) {
+      privEl.placeholder = isNew
+        ? '点击“生成新用户密钥”后自动填充 ESEC（不上传服务器）'
+        : '粘贴或导入 ESEC 密钥，例如 esec1...';
+    }
+
+    if (emailWrapEl) emailWrapEl.style.display = isNew ? 'flex' : 'none';
     if (settingsIdentityGenerateMainBtn) settingsIdentityGenerateMainBtn.style.display = (isNew && !identityHasExisting) ? 'inline-flex' : 'none';
     if (settingsIdentityModePasteBtn) {
       settingsIdentityModePasteBtn.classList.toggle('apply-editor-btn-primary', !isNew);
@@ -466,8 +609,107 @@ window.addEventListener('DOMContentLoaded', async () => {
       settingsIdentityModeNewBtn.classList.toggle('apply-editor-btn-primary', isNew);
       settingsIdentityModeNewBtn.classList.toggle('apply-editor-btn-secondary', !isNew);
     }
+
+    if (settingsIdentitySaveBtn) {
+      settingsIdentitySaveBtn.style.display = identityHasExisting ? 'none' : 'inline-flex';
+    }
+    if (settingsIdentityLogoutBtn) {
+      settingsIdentityLogoutBtn.style.display = identityHasExisting ? 'inline-flex' : 'none';
+    }
   }
 
+  /** 新用户邮箱：基本格式（与常见 type=email 规则一致） */
+  function isValidIdentityEmail(s) {
+    const t = (s || '').trim();
+    if (!t) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+  }
+
+  /**
+   * 保存身份前校验：「新用户」须有效邮箱；ESEC 须能被主进程解析（与 identity:save 一致）
+   */
+  async function assertIdentityInputsCanSave() {
+    const privEl = document.getElementById('settings-identity-privkey');
+    const emailEl = document.getElementById('settings-identity-email');
+    const priv = (privEl && privEl.value.trim()) || '';
+    if (!priv) {
+      throw new Error('请先粘贴或输入 ESEC 密钥');
+    }
+    if (identityLoginMode === 'new') {
+      const email = (emailEl && emailEl.value.trim()) || '';
+      if (!isValidIdentityEmail(email)) {
+        throw new Error('「新用户（邮箱）」模式下请填写有效的邮箱地址');
+      }
+    }
+    if (window.markwrite?.api?.identityDeriveFromEsec) {
+      const d = await window.markwrite.api.identityDeriveFromEsec(priv);
+      if (!d || !d.ok) {
+        throw new Error('ESEC 无效：须为以 esec 开头的完整密钥（可粘贴后重试）');
+      }
+    }
+  }
+
+  /**
+   * 本地 identity 已写入后，按当前 Sync 的 esserver 调用与 eventstoreUI create_user 相同的注册（code 100）。
+   * @param {string} [emailForServer] 「新用户」模式下的邮箱；粘贴 ESEC 可为空串。
+   */
+  async function runServerRegisterAfterLocalIdentity(emailForServer) {
+    if (!window.markwrite?.api?.identityRegisterOnServer) return;
+    const email = typeof emailForServer === 'string' ? emailForServer.trim() : '';
+    const reg = await window.markwrite.api.identityRegisterOnServer({ email });
+    if (reg && reg.skipped) {
+      showAppAlert('本地身份已保存。请在 Sync & Servers 中填写 EventStore WebSocket（esserver）后再点击「使用此 ESEC 登录」以完成服务器注册。');
+      return;
+    }
+    if (reg && !reg.ok) {
+      showAppAlert(`本地已保存，服务器注册失败：${reg.message || ''}`);
+      return;
+    }
+    showAppAlert('已在 EventStore 服务器完成用户注册（与 eventstoreUI create_user 一致，code 100）。');
+  }
+
+  function syncProfileIdentityKeys() {
+    const pubEl = document.getElementById('settings-identity-pubkey');
+    const privEl = document.getElementById('settings-identity-privkey');
+    const pubDisplay = document.getElementById('settings-profile-pubkey-display');
+    const privDisplay = document.getElementById('settings-profile-privkey-display');
+    if (pubDisplay) pubDisplay.value = (pubEl && pubEl.value) || '';
+    if (privDisplay) privDisplay.value = (privEl && privEl.value) || '';
+  }
+
+  function loadProfileFormFromServer() {
+    if (!window.markwrite?.api?.identityFetchProfile) return Promise.resolve();
+    return window.markwrite.api.identityFetchProfile().then((res) => {
+      const nameEl = document.getElementById('settings-profile-name');
+      const titleEl = document.getElementById('settings-profile-title');
+      const bioEl = document.getElementById('settings-profile-bio');
+      const previewEl = document.getElementById('settings-profile-avatar-preview');
+      if (!res || !res.ok) return;
+      const p = res.profile;
+      if (!p) {
+        profileServerAvatarUrl = '';
+        if (previewEl) previewEl.innerHTML = '';
+        if (nameEl) nameEl.value = '';
+        if (titleEl) titleEl.value = '';
+        if (bioEl) bioEl.value = '';
+        return;
+      }
+      if (nameEl) nameEl.value = p.displayName || p.name || '';
+      if (titleEl) titleEl.value = p.title || '';
+      if (bioEl) bioEl.value = p.bio || '';
+      profileServerAvatarUrl = ((p.avatarUrl || p.avatar || '') + '').trim();
+      if (previewEl) {
+        previewEl.innerHTML = '';
+        if (profileServerAvatarUrl) {
+          const img = document.createElement('img');
+          img.src = profileServerAvatarUrl;
+          img.alt = '';
+          img.onerror = () => { previewEl.innerHTML = ''; };
+          previewEl.appendChild(img);
+        }
+      }
+    }).catch(() => {});
+  }
 
   function switchSettingsTab(name) {
     settingsTabs.forEach((tab) => {
@@ -483,9 +725,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     if ((name === 'identity-login' || name === 'identity-profile') && window.markwrite?.api?.identityFetchProfile) {
       startCheckProfile();
     }
-    if (name === 'identity-profile' && settingsProfilePubkeyInput) {
-      settingsProfilePubkeyInput.value = (settingsIdentityPub && settingsIdentityPub.value) || '';
+    if (name === 'identity-profile') {
+      syncProfileIdentityKeys();
+      return loadProfileFormFromServer();
     }
+    return Promise.resolve();
   }
 
   /** 检查远程 profile：老用户看是否有资料，新用户提示完善。丝滑无弹窗，仅更新状态区 */
@@ -613,80 +857,101 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Identity / Account 保存（无「取消」按钮）
+  // 身份：独立按钮「使用此 ESEC 登录」与「退出登录」，用显示/隐藏切换，不复用同一按钮改文案
+  if (settingsIdentityLogoutBtn && window.markwrite?.api?.identitySave) {
+    settingsIdentityLogoutBtn.addEventListener('click', () => {
+      showSettingsConfirm(
+        '建议先复制并备份好 ESEC 密钥。\n确定要退出登录并清除当前用户的本地密钥吗？',
+        (ok) => {
+          if (!ok) return;
+          const payload = { pubkey: '', privkey: '' };
+          window.markwrite.api.identitySave(payload).then((res) => {
+            if (res && res.ok) {
+              identityPrefillNonce += 1;
+              identityHasExisting = false;
+              const pubOut = document.getElementById('settings-identity-pubkey');
+              const privOut = document.getElementById('settings-identity-privkey');
+              const emailOut = document.getElementById('settings-identity-email');
+              if (pubOut) pubOut.value = '';
+              if (privOut) privOut.value = '';
+              if (emailOut) emailOut.value = '';
+              if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
+              identityLoginMode = 'paste';
+              applyIdentityLoginMode();
+              syncProfileIdentityKeys();
+              requestAnimationFrame(() => {
+                try {
+                  const saveBtn = document.getElementById('settings-identity-save-btn');
+                  if (saveBtn && saveBtn.offsetParent !== null) saveBtn.focus();
+                } catch (_) {}
+              });
+            } else {
+              showAppAlert((res && res.message) || '退出登录失败');
+            }
+          }).catch((e) => {
+            showAppAlert(`退出登录失败：${e && e.message ? e.message : String(e)}`);
+          });
+        },
+      );
+    });
+  }
+
   if (settingsIdentitySaveBtn && window.markwrite?.api?.identitySave) {
     settingsIdentitySaveBtn.addEventListener('click', () => {
-      if (identityHasExisting) {
-        // 已有用户：此按钮作为「退出登录」，前置一次确认
-        // eslint-disable-next-line no-alert
-        const ok = window.confirm('建议先复制并备份好 ESEC 密钥。\n确定要退出登录并清除当前用户的本地密钥吗？');
-        if (!ok) return;
-        const payload = { pubkey: '', privkey: '' };
-        window.markwrite.api.identitySave(payload).then((res) => {
-          if (res && res.ok) {
-            identityHasExisting = false;
-            if (settingsIdentityPub) settingsIdentityPub.value = '';
-            if (settingsIdentityPriv) settingsIdentityPriv.value = '';
-            if (settingsIdentityPriv) settingsIdentityPriv.readOnly = false;
-            if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
-            identityLoginMode = 'paste';
-            applyIdentityLoginMode();
-            if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '使用此 ESEC 登录';
-          } else {
-            // eslint-disable-next-line no-alert
-            alert((res && res.message) || '退出登录失败');
-          }
-        }).catch((e) => {
-          // eslint-disable-next-line no-alert
-          alert(`退出登录失败：${e && e.message ? e.message : String(e)}`);
-        });
-      } else {
-        // 新用户：正常保存密钥
+      if (identityHasExisting) return;
+      void (async () => {
+        try {
+          await assertIdentityInputsCanSave();
+        } catch (e) {
+          showAppAlert(e && e.message ? e.message : String(e));
+          return;
+        }
+        const pubElSave = document.getElementById('settings-identity-pubkey');
+        const privElSave = document.getElementById('settings-identity-privkey');
         const payload = {
-          pubkey: settingsIdentityPub ? settingsIdentityPub.value.trim() : '',
-          privkey: settingsIdentityPriv ? settingsIdentityPriv.value.trim() : '',
+          pubkey: pubElSave ? pubElSave.value.trim() : '',
+          privkey: privElSave ? privElSave.value.trim() : '',
         };
-        window.markwrite.api.identitySave(payload).then((res) => {
+        try {
+          const res = await window.markwrite.api.identitySave(payload);
           if (res && res.ok) {
+            const emailForServer = identityLoginMode === 'new'
+              ? (document.getElementById('settings-identity-email') && document.getElementById('settings-identity-email').value.trim()) || ''
+              : '';
             identityHasExisting = !!(payload.privkey && payload.privkey.trim());
-            if (settingsIdentityPriv) settingsIdentityPriv.readOnly = identityHasExisting;
             if (settingsIdentityEmptyHint) {
               settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
             }
-            if (settingsIdentityGenerateMainBtn) {
-              settingsIdentityGenerateMainBtn.style.display = identityHasExisting ? 'none' : 'inline-flex';
-            }
-            if (settingsIdentitySaveBtn) {
-              settingsIdentitySaveBtn.textContent = identityHasExisting ? '退出登录' : '使用此 ESEC 登录';
-            }
             identityLoginMode = 'paste';
             applyIdentityLoginMode();
+            if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
             if (identityHasExisting) {
-              // 保存成功后，从主进程重新拉一遍 identity，确保 pubkey（epub）立即更新
               if (window.markwrite?.api?.identityGet) {
                 window.markwrite.api.identityGet().then((id) => {
                   if (!id) return;
                   const displayPub = id.pubkeyEpub || id.pubkey || id.pubkeyHex || '';
-                  if (settingsIdentityPub) settingsIdentityPub.value = displayPub;
+                  const pubEl = document.getElementById('settings-identity-pubkey');
+                  if (pubEl) pubEl.value = displayPub;
+                  if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
                 }).catch(() => {});
               }
+              await runServerRegisterAfterLocalIdentity(emailForServer);
               startCheckProfile();
             }
           } else {
-            // eslint-disable-next-line no-alert
-            alert((res && res.message) || '保存失败');
+            showAppAlert((res && res.message) || '保存失败');
           }
-        }).catch((e) => {
-          // eslint-disable-next-line no-alert
-          alert(`保存身份失败：${e && e.message ? e.message : String(e)}`);
-        });
-      }
+        } catch (e) {
+          showAppAlert(`保存身份失败：${e && e.message ? e.message : String(e)}`);
+        }
+      })();
     });
   }
 
   if (settingsIdentityCopyBtn) {
     settingsIdentityCopyBtn.addEventListener('click', () => {
-      const v = (settingsIdentityPriv && settingsIdentityPriv.value) || '';
+      const privEl = document.getElementById('settings-identity-privkey');
+      const v = (privEl && privEl.value) || '';
       if (!v.trim() || !window.markwrite?.api?.clipboardWriteText) return;
       const showCopyState = (text) => {
         const oldText = settingsIdentityCopyBtn.textContent;
@@ -707,34 +972,33 @@ window.addEventListener('DOMContentLoaded', async () => {
   function handleGenerateIdentity() {
     if (!window.markwrite?.api?.identityGenerate) return;
     if (identityLoginMode !== 'new') {
-      // eslint-disable-next-line no-alert
-      alert('请先切换到“新用户（邮箱）”模式。');
+      showAppAlert('请先切换到“新用户（邮箱）”模式。');
       return;
     }
-    const email = (settingsIdentityEmailInput && settingsIdentityEmailInput.value.trim()) || '';
-    if (!email || !email.includes('@')) {
-      // eslint-disable-next-line no-alert
-      alert('请先输入有效邮箱。');
+    const emailEl = document.getElementById('settings-identity-email');
+    const email = (emailEl && emailEl.value.trim()) || '';
+    if (!isValidIdentityEmail(email)) {
+      showAppAlert('请先输入有效的邮箱地址（需包含 @ 与域名）。');
       return;
     }
     window.markwrite.api.identityGenerate().then((result) => {
       if (!result || !result.ok) {
-        // eslint-disable-next-line no-alert
-        alert(`生成 ESEC 失败：${(result && result.message) || '未知错误'}`);
+        showAppAlert(`生成 ESEC 失败：${(result && result.message) || '未知错误'}`);
         return;
       }
-      if (settingsIdentityPriv) settingsIdentityPriv.value = result.esec || '';
-      if (settingsIdentityPub) settingsIdentityPub.value = result.epub || result.pubkeyHex || '';
+      const privEl = document.getElementById('settings-identity-privkey');
+      const pubEl = document.getElementById('settings-identity-pubkey');
+      if (privEl) privEl.value = result.esec || '';
+      if (pubEl) pubEl.value = result.epub || result.pubkeyHex || '';
       if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'none';
       identityHasExisting = false;
-      if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '使用此 ESEC 登录';
+      applyIdentityLoginMode();
       // 新用户生成后不自动保存，用户可继续完善资料后点击上传再保存
       if (settingsIdentityProfileSetBtn) {
         settingsIdentityProfileSetBtn.click();
       }
     }).catch((e) => {
-      // eslint-disable-next-line no-alert
-      alert(`生成 ESEC 失败：${e && e.message ? e.message : String(e)}`);
+      showAppAlert(`生成 ESEC 失败：${e && e.message ? e.message : String(e)}`);
     });
   }
 
@@ -746,12 +1010,12 @@ window.addEventListener('DOMContentLoaded', async () => {
     settingsIdentityModePasteBtn.addEventListener('click', () => {
       identityLoginMode = 'paste';
       applyIdentityLoginMode();
-      if (settingsIdentityPriv) {
+      const priv = document.getElementById('settings-identity-privkey');
+      if (priv) {
         setTimeout(() => {
-          settingsIdentityPriv.focus();
-          const len = settingsIdentityPriv.value ? settingsIdentityPriv.value.length : 0;
-          // 把光标放到末尾，便于直接继续输入/粘贴（未启用 readOnly 时）
-          try { settingsIdentityPriv.setSelectionRange(len, len); } catch (_) {}
+          priv.focus();
+          const len = priv.value ? priv.value.length : 0;
+          try { priv.setSelectionRange(len, len); } catch (_) {}
         }, 0);
       }
     });
@@ -760,57 +1024,43 @@ window.addEventListener('DOMContentLoaded', async () => {
     settingsIdentityModeNewBtn.addEventListener('click', () => {
       identityLoginMode = 'new';
       applyIdentityLoginMode();
-      if (settingsIdentityEmailInput) {
+      const email = document.getElementById('settings-identity-email');
+      if (email) {
         setTimeout(() => {
-          settingsIdentityEmailInput.focus();
-          const len = settingsIdentityEmailInput.value ? settingsIdentityEmailInput.value.length : 0;
-          try { settingsIdentityEmailInput.setSelectionRange(len, len); } catch (_) {}
+          email.focus();
+          const len = email.value ? email.value.length : 0;
+          try { email.setSelectionRange(len, len); } catch (_) {}
         }, 0);
       }
     });
   }
 
-  // 在 ESEC 框中粘贴/输入新 esec 时，自动计算并填充 epub 公钥（仅本地展示，不保存）
-  if (settingsIdentityPriv && window.markwrite?.api?.identityDeriveFromEsec) {
-    settingsIdentityPriv.addEventListener('input', () => {
-      const v = (settingsIdentityPriv.value || '').trim();
+  // 在 ESEC 框中粘贴/输入新 esec 时，自动计算并填充 epub（委托到 overlay，避免初始化时节点引用为 null）
+  if (settingsOverlay && window.markwrite?.api?.identityDeriveFromEsec) {
+    settingsOverlay.addEventListener('input', (e) => {
+      const t = e.target;
+      if (!t || t.id !== 'settings-identity-privkey') return;
+      if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
+      const v = (t.value || '').trim();
       if (!v || !v.startsWith('esec') || v === lastDerivedEsec) return;
-      // 简单长度判断，避免每个按键都触发
       if (v.length < 10) return;
       lastDerivedEsec = v;
       window.markwrite.api.identityDeriveFromEsec(v).then((res) => {
         if (!res || !res.ok) return;
-        if (settingsIdentityPub) settingsIdentityPub.value = res.pubkeyEpub || res.pubkeyHex || '';
+        const pubEl = document.getElementById('settings-identity-pubkey');
+        if (pubEl) pubEl.value = res.pubkeyEpub || res.pubkeyHex || '';
+        if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
       }).catch(() => {});
     });
   }
 
   if (settingsIdentityProfileSetBtn && settingsIdentityProfileFormWrap && settingsIdentityKeySection) {
     settingsIdentityProfileSetBtn.addEventListener('click', () => {
-      switchSettingsTab('identity-profile');
       if (settingsIdentityProfileEmpty) settingsIdentityProfileEmpty.style.display = 'none';
-      if (settingsProfilePubkeyInput) {
-        settingsProfilePubkeyInput.value = (settingsIdentityPub && settingsIdentityPub.value) || '';
-      }
-      if (settingsProfileNameInput) settingsProfileNameInput.focus();
-      if (window.markwrite?.api?.identityFetchProfile) {
-        window.markwrite.api.identityFetchProfile().then((res) => {
-          if (res && res.ok && res.profile) {
-            const p = res.profile;
-            if (settingsProfileNameInput) settingsProfileNameInput.value = p.displayName || p.name || '';
-            if (settingsProfileTitleInput) settingsProfileTitleInput.value = p.title || '';
-            if (settingsProfileAvatarInput) settingsProfileAvatarInput.value = p.avatarUrl || p.avatar || '';
-            if (settingsProfileBioInput) settingsProfileBioInput.value = p.bio || '';
-            if (settingsProfileAvatarPreview && (p.avatarUrl || p.avatar)) {
-              const img = document.createElement('img');
-              img.src = p.avatarUrl || p.avatar;
-              img.alt = '';
-              settingsProfileAvatarPreview.innerHTML = '';
-              settingsProfileAvatarPreview.appendChild(img);
-            }
-          }
-        }).catch(() => {});
-      }
+      switchSettingsTab('identity-profile').then(() => {
+        const nameEl = document.getElementById('settings-profile-name');
+        if (nameEl) nameEl.focus();
+      });
     });
   }
   if (settingsProfileBackBtn && settingsIdentityProfileFormWrap && settingsIdentityKeySection) {
@@ -823,40 +1073,65 @@ window.addEventListener('DOMContentLoaded', async () => {
       settingsIdentityProfileEmpty.style.display = 'none';
     });
   }
-  if (settingsProfileAvatarInput && settingsProfileAvatarPreview) {
-    settingsProfileAvatarInput.addEventListener('input', () => {
-      const url = (settingsProfileAvatarInput.value || '').trim();
-      settingsProfileAvatarPreview.innerHTML = '';
-      if (url) {
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = '';
-        img.onerror = () => { settingsProfileAvatarPreview.innerHTML = ''; };
-        settingsProfileAvatarPreview.appendChild(img);
-      }
+  function copyProfileKey(btn, text) {
+    const v = (text || '').trim();
+    if (!v || !window.markwrite?.api?.clipboardWriteText) return;
+    const showCopyState = (msg) => {
+      const oldText = btn.textContent;
+      btn.textContent = msg;
+      setTimeout(() => {
+        btn.textContent = oldText;
+      }, 5000);
+    };
+    window.markwrite.api.clipboardWriteText(v).then((res) => {
+      if (res && res.ok) showCopyState('已复制');
+      else showCopyState('复制失败');
+    }).catch(() => {
+      showCopyState('复制失败');
+    });
+  }
+  const settingsProfileCopyPubkeyBtn = document.getElementById('settings-profile-copy-pubkey');
+  const settingsProfileCopyPrivkeyBtn = document.getElementById('settings-profile-copy-privkey');
+  if (settingsProfileCopyPubkeyBtn) {
+    settingsProfileCopyPubkeyBtn.addEventListener('click', () => {
+      const el = document.getElementById('settings-profile-pubkey-display');
+      copyProfileKey(settingsProfileCopyPubkeyBtn, el && el.value);
+    });
+  }
+  if (settingsProfileCopyPrivkeyBtn) {
+    settingsProfileCopyPrivkeyBtn.addEventListener('click', () => {
+      const el = document.getElementById('settings-profile-privkey-display');
+      copyProfileKey(settingsProfileCopyPrivkeyBtn, el && el.value);
     });
   }
   if (settingsProfileSaveBtn && window.markwrite?.api?.identitySaveProfile) {
     settingsProfileSaveBtn.addEventListener('click', () => {
       const displayName = (settingsProfileNameInput && settingsProfileNameInput.value.trim()) || '';
       const title = (settingsProfileTitleInput && settingsProfileTitleInput.value.trim()) || '';
-      const avatarUrl = (settingsProfileAvatarInput && settingsProfileAvatarInput.value.trim()) || '';
+      const avatarUrl = (profileServerAvatarUrl || '').trim();
       const bio = (settingsProfileBioInput && settingsProfileBioInput.value.trim()) || '';
       const profile = { displayName, title, avatarUrl, bio };
       const ensureIdentitySaved = () => {
         if (identityHasExisting || !window.markwrite?.api?.identitySave) return Promise.resolve({ ok: true });
-        const payload = {
-          pubkey: settingsIdentityPub ? settingsIdentityPub.value.trim() : '',
-          privkey: settingsIdentityPriv ? settingsIdentityPriv.value.trim() : '',
-        };
-        if (!payload.privkey) return Promise.reject(new Error('请先粘贴或生成 ESEC'));
-        return window.markwrite.api.identitySave(payload).then((res) => {
-          if (res && res.ok) {
-            identityHasExisting = true;
-            if (settingsIdentitySaveBtn) settingsIdentitySaveBtn.textContent = '退出登录';
-            return res;
-          }
-          throw new Error((res && res.message) || '保存身份失败');
+        return assertIdentityInputsCanSave().then(() => {
+          const pubEl = document.getElementById('settings-identity-pubkey');
+          const privEl = document.getElementById('settings-identity-privkey');
+          const payload = {
+            pubkey: pubEl ? pubEl.value.trim() : '',
+            privkey: privEl ? privEl.value.trim() : '',
+          };
+          const emailForReg = identityLoginMode === 'new'
+            ? (document.getElementById('settings-identity-email') && document.getElementById('settings-identity-email').value.trim()) || ''
+            : '';
+          return window.markwrite.api.identitySave(payload).then(async (res) => {
+            if (res && res.ok) {
+              identityHasExisting = true;
+              applyIdentityLoginMode();
+              await runServerRegisterAfterLocalIdentity(emailForReg);
+              return res;
+            }
+            throw new Error((res && res.message) || '保存身份失败');
+          });
         });
       };
 
@@ -865,12 +1140,10 @@ window.addEventListener('DOMContentLoaded', async () => {
           switchSettingsTab('identity-login');
           startCheckProfile();
         } else {
-          // eslint-disable-next-line no-alert
-          alert(res && res.message ? res.message : '保存失败');
+          showAppAlert(res && res.message ? res.message : '保存失败');
         }
       }).catch((e) => {
-        // eslint-disable-next-line no-alert
-        alert(`保存失败：${e && e.message ? e.message : String(e)}`);
+        showAppAlert(`保存失败：${e && e.message ? e.message : String(e)}`);
       });
     });
   }
@@ -1160,10 +1433,10 @@ window.addEventListener('DOMContentLoaded', async () => {
               await loadFileTree();
               markFileSelected(res.newPath);
             } else if (res && res.message) {
-              window.alert(`重命名失败：${res.message}`);
+              showAppAlert(`重命名失败：${res.message}`);
             }
           } catch (_) {
-            window.alert('重命名失败');
+            showAppAlert('重命名失败');
           }
         };
 
@@ -1181,26 +1454,30 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       const deleteItem = makeItem('删除');
       deleteItem.style.color = '#fecaca';
-      deleteItem.addEventListener('click', async () => {
+      deleteItem.addEventListener('click', () => {
         doClose();
         const isDir = !!entry.isDir;
-        const ok = window.confirm(isDir ? `确定删除目录及其所有内容？\n${entry.path}` : `确定删除文件？\n${entry.path}`);
-        if (!ok) return;
-        try {
-          const res = await window.markwrite.api.deleteFile(entry.path);
-          if (res && res.ok) {
-            if (currentFilePath === entry.path) {
-              currentFilePath = null;
-              if (editor) editor.setValue('');
-              setFilename(null);
+        const msg = isDir ? `确定删除目录及其所有内容？\n${entry.path}` : `确定删除文件？\n${entry.path}`;
+        showAppConfirm(msg, (ok) => {
+          if (!ok) return;
+          void (async () => {
+            try {
+              const res = await window.markwrite.api.deleteFile(entry.path);
+              if (res && res.ok) {
+                if (currentFilePath === entry.path) {
+                  currentFilePath = null;
+                  if (editor) editor.setValue('');
+                  setFilename(null);
+                }
+                await loadFileTree();
+              } else if (res && res.message) {
+                showAppAlert(`删除失败：${res.message}`);
+              }
+            } catch (err) {
+              showAppAlert('删除失败');
             }
-            await loadFileTree();
-          } else if (res && res.message) {
-            window.alert(`删除失败：${res.message}`);
-          }
-        } catch (err) {
-          window.alert('删除失败');
-        }
+          })();
+        }, { title: '确认删除', confirmText: '删除', cancelText: '取消' });
       });
 
       menu.appendChild(renameItem);
