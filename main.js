@@ -27,7 +27,9 @@ const {
   fetchProfile: fetchEventstoreProfile,
   saveProfile: saveEventstoreProfile,
   registerUserOnServer,
+  invalidateEsclientModule,
 } = require('./lib/eventstore-profile.js');
+const { writeEventstoreConfigFromSync } = require('./lib/write-eventstore-config.js');
 
 function createServer() {
   const mime = {
@@ -556,6 +558,8 @@ ipcMain.handle('sync:saveConfig', async (_event, payload) => {
       activeId: payload && typeof payload.activeId === 'string' ? payload.activeId : null,
     };
     fs.writeFileSync(SYNC_CONFIG_FILE, JSON.stringify(toSave, null, 2), 'utf8');
+    writeEventstoreConfigFromSync(SYNC_CONFIG_FILE);
+    invalidateEsclientModule();
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
@@ -846,6 +850,7 @@ const { getAiConfig, saveAiConfig } = require('./lib/ai-config.js');
 let aiBackend = null;
 
 app.whenReady().then(() => {
+  writeEventstoreConfigFromSync(SYNC_CONFIG_FILE);
   ensureLinuxDesktopFile();
   const userDataPath = app.getPath('userData');
   aiBackend = getBackend(userDataPath);
