@@ -180,7 +180,10 @@ function ensureLinuxDesktopFile() {
 
 ipcMain.handle('file:open', async () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  loadWorkspaceRoot();
+  const defaultDir = workspaceRoot || DEFAULT_WORKSPACE;
   const result = await dialog.showOpenDialog(win, {
+    defaultPath: defaultDir,
     properties: ['openFile', 'openDirectory'],
     filters: [
       { name: 'Markdown', extensions: ['md', 'markdown'] },
@@ -268,7 +271,11 @@ ipcMain.handle('file:saveTo', async (_, targetPath, content) => {
 
 ipcMain.handle('file:saveAs', async (_, content) => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
+  loadWorkspaceRoot();
+  const defaultDir = workspaceRoot || DEFAULT_WORKSPACE;
+  const defaultFile = path.join(defaultDir, 'untitled.md');
   const result = await dialog.showSaveDialog(win, {
+    defaultPath: defaultFile,
     filters: [
       { name: 'Markdown', extensions: ['md', 'markdown'] },
       { name: 'All', extensions: ['*'] },
@@ -892,36 +899,103 @@ ipcMain.handle('app:window:close', () => {
 const { getBackend } = require('./lib/backends/index.js');
 const { getAiConfig, saveAiConfig } = require('./lib/ai-config.js');
 let aiBackend = null;
+let aiBackendInitAttempted = false;
+let aiModelsCache = null;
+let aiModelsLastFetchAt = 0;
+let aiModelsRefreshing = false;
+let aiModelsRefreshScheduled = false;
+
+function ensureAiBackend(userDataPath) {
+  if (aiBackend) return aiBackend;
+  if (aiBackendInitAttempted) return null;
+  aiBackendInitAttempted = true;
+  try {
+    aiBackend = getBackend(userDataPath);
+  } catch (e) {
+    aiBackend = null;
+  }
+  return aiBackend;
+}
+
+async function refreshAiModelsCache(userDataPath, directory) {
+  if (aiModelsRefreshing) return aiModelsCache;
+  aiModelsRefreshing = true;
+  try {
+    const b = ensureAiBackend(userDataPath);
+    if (!b || typeof b.models !== 'function') {
+      aiModelsCache = { error: '当前后端不支持列出模型（请使用 OpenAgent 后端）' };
+      aiModelsLastFetchAt = Date.now();
+      return aiModelsCache;
+    }
+    const r = await b.models({ directory });
+    if (r && !r.error) {
+      aiModelsCache = r;
+      aiModelsLastFetchAt = Date.now();
+    } else if (r && r.error) {
+      aiModelsCache = r;
+      aiModelsLastFetchAt = Date.now();
+    }
+    return aiModelsCache;
+  } finally {
+    aiModelsRefreshing = false;
+  }
+}
+
+function scheduleAiModelsRefresh(userDataPath, directory) {
+  if (aiModelsRefreshing || aiModelsRefreshScheduled) return;
+  aiModelsRefreshScheduled = true;
+  setTimeout(() => {
+    aiModelsRefreshScheduled = false;
+    void refreshAiModelsCache(userDataPath, directory);
+  }, 0);
+}
 
 app.whenReady().then(() => {
   writeEventstoreConfigFromSync(SYNC_CONFIG_FILE);
   ensureLinuxDesktopFile();
   const userDataPath = app.getPath('userData');
-  aiBackend = getBackend(userDataPath);
 
   ipcMain.handle('ai:chat', async (_, payload) => {
     const message = payload && typeof payload.message === 'string' ? payload.message : (payload || '');
     const context = payload && typeof payload === 'object' && 'context' in payload ? payload.context : undefined;
-    return aiBackend ? aiBackend.chat(message, context) : { error: 'AI 后端未初始化' };
+    const b = ensureAiBackend(userDataPath);
+    return b ? b.chat(message, context) : { error: 'AI 后端未初始化' };
   });
   ipcMain.handle('ai:docEdit', async (_, payload) => {
     const message = payload && typeof payload.message === 'string' ? payload.message : (payload || '');
     const context = payload && typeof payload === 'object' && 'context' in payload ? payload.context : undefined;
-    const fn = aiBackend && typeof aiBackend.docEdit === 'function' ? aiBackend.docEdit : null;
+    const b = ensureAiBackend(userDataPath);
+    const fn = b && typeof b.docEdit === 'function' ? b.docEdit : null;
     return fn ? fn(message, context) : { error: '智能文档 Agent 未就绪，请使用 OpenAgent 后端' };
   });
   ipcMain.handle('ai:health', async () => {
-    return aiBackend ? aiBackend.health() : { ok: false, message: 'AI 后端未初始化' };
+    const b = ensureAiBackend(userDataPath);
+    return b ? b.health() : { ok: false, message: 'AI 后端未初始化' };
   });
   ipcMain.handle('ai:models', async (_, payload) => {
     const directory = payload && typeof payload.directory === 'string' ? payload.directory : undefined;
-    const fn = aiBackend && typeof aiBackend.models === 'function' ? aiBackend.models : null;
-    return fn ? fn({ directory }) : { error: '当前后端不支持列出模型（请使用 OpenAgent 后端）' };
+    const now = Date.now();
+    const cacheFresh = aiModelsCache && (now - aiModelsLastFetchAt < 60 * 1000);
+    if (cacheFresh) {
+      scheduleAiModelsRefresh(userDataPath, directory);
+      return { ...aiModelsCache, loading: false, fromCache: true };
+    }
+    if (aiModelsCache) {
+      scheduleAiModelsRefresh(userDataPath, directory);
+      return { ...aiModelsCache, loading: true, fromCache: true };
+    }
+    // 首次请求也立即返回，后台异步刷新，避免任何同步初始化阻塞 UI
+    scheduleAiModelsRefresh(userDataPath, directory);
+    return { providers: [], loading: true, fromCache: false };
   });
   ipcMain.handle('ai:config:get', () => getAiConfig(userDataPath));
   ipcMain.handle('ai:config:save', (_, config) => {
     saveAiConfig(userDataPath, config);
-    aiBackend = getBackend(userDataPath);
+    aiBackend = null;
+    aiBackendInitAttempted = false;
+    aiModelsCache = null;
+    aiModelsLastFetchAt = 0;
+    ensureAiBackend(userDataPath);
     return true;
   });
   function tryListen(port) {

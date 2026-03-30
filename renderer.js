@@ -2387,6 +2387,9 @@ window.addEventListener('DOMContentLoaded', async () => {
       try {
         const directory = currentFilePath ? (currentFilePath.includes('/') ? currentFilePath.split('/').slice(0, -1).join('/') : undefined) : undefined;
         const r = await window.markwrite.api.aiModels(directory);
+        if (r && r.loading) {
+          setTimeout(() => { refreshModelsFromBackend(); }, 700);
+        }
         if (!r || r.error) return;
         // 重建 options：完全以 config.json 为准
         clearOptions();
