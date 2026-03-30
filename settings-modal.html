@@ -227,6 +227,13 @@
     background: linear-gradient(135deg, rgba(96, 165, 250, 0.55), rgba(59, 130, 246, 0.25), rgba(15, 23, 42, 0.8));
     box-shadow: 0 12px 40px rgba(37, 99, 235, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.08);
   }
+  .profile-form-avatar-ring:hover {
+    box-shadow: 0 14px 46px rgba(37, 99, 235, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+  .profile-form-avatar-preview-wrap {
+    position: relative;
+    border-radius: 999px;
+  }
   #settings-profile-avatar-preview.profile-form-avatar-preview--hero {
     width: 132px;
     height: 132px;
@@ -236,6 +243,10 @@
     background: radial-gradient(circle at 35% 30%, rgba(71, 85, 105, 0.5), rgba(15, 23, 42, 0.95));
     border: 2px solid rgba(30, 41, 59, 0.9);
     box-sizing: border-box;
+  }
+  .profile-form-avatar-trigger:hover #settings-profile-avatar-preview.profile-form-avatar-preview--hero {
+    border-color: rgba(96, 165, 250, 0.85);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.18);
   }
   #settings-profile-avatar-preview.profile-form-avatar-preview--hero:empty {
     background: radial-gradient(circle at 35% 30%, rgba(71, 85, 105, 0.45), rgba(15, 23, 42, 0.98));
@@ -598,7 +609,9 @@
             <p class="profile-form-hero-name" id="settings-profile-hero-name">未设置昵称</p>
             <div class="profile-form-avatar-ring">
               <button type="button" class="profile-form-avatar-trigger" id="settings-profile-avatar-trigger" title="点击上传头像，或聚焦后 Ctrl+V 粘贴图片">
-                <div id="settings-profile-avatar-preview" class="profile-form-avatar-preview profile-form-avatar-preview--hero"></div>
+                <div class="profile-form-avatar-preview-wrap">
+                  <div id="settings-profile-avatar-preview" class="profile-form-avatar-preview profile-form-avatar-preview--hero"></div>
+                </div>
               </button>
             </div>
             <input id="settings-profile-avatar-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />

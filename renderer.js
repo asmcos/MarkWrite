@@ -827,6 +827,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   function loadProfileFormFromServer() {
     if (!window.markwrite?.api?.identityFetchProfile) return Promise.resolve();
     return window.markwrite.api.identityFetchProfile().then((res) => {
+      console.log('[identity:fetchProfile] response:', res);
       const nameEl = document.getElementById('settings-profile-name');
       const titleEl = document.getElementById('settings-profile-title');
       const bioEl = document.getElementById('settings-profile-bio');
