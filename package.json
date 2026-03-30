@@ -9,7 +9,8 @@
     "vendor:esclient": "node scripts/vendor-eventstore-esclient.mjs",
     "start": "npm run build:tailwind && npm run build:esclient && ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
     "sync-preview-theme": "node scripts/sync-preview-theme.mjs",
-    "update:openagent": "npm install git+https://github.com/asmcos/openagent.git --save-dev"
+    "update:openagent": "npm install openagent@git+https://github.com/asmcos/openagent.git --save-dev",
+    "setup": "npm run update:openagent && npm run sync-preview-theme && npm run vendor:esclient && npm run build:tailwind && npm run build:esclient"
   },
   "keywords": [
     "markdown",
@@ -36,13 +37,11 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@openagent/app": "file:./node_modules/openagent/packages/app",
-    "@openagent/core": "file:./node_modules/openagent/packages/core",
     "@tailwindcss/cli": "^4.2.2",
     "autoprefixer": "^10.4.27",
     "electron": "^40.6.1",
     "esbuild": "^0.27.4",
-    "openagent": "git+https://github.com/asmcos/openagent.git",
+    "openagent": "github:asmcos/openagent",
     "postcss": "^8.5.8",
     "tailwindcss": "^4.2.2"
   }

@@ -22,6 +22,17 @@ let workspaceWatcher = null;
 let workspaceChangeTimer = null;
 let mainWindow = null;
 
+/** 私钥字节 → 小写 hex（用于展示，不含 0x） */
+function secretBytesToHex(bytes) {
+  if (!bytes) return '';
+  try {
+    const u8 = bytes instanceof Uint8Array ? bytes : Buffer.from(bytes);
+    return Buffer.from(u8).toString('hex');
+  } catch (_) {
+    return '';
+  }
+}
+
 const { render: renderMarkdown } = require('./md-renderer.js');
 const {
   fetchProfile: fetchEventstoreProfile,
@@ -30,6 +41,12 @@ const {
   invalidateEsclientModule,
 } = require('./lib/eventstore-profile.js');
 const { writeEventstoreConfigFromSync } = require('./lib/write-eventstore-config.js');
+
+/** 将当前 Sync 活跃服务器写入 eventstore-vendor/config.cjs 并清 require 缓存，确保 esclient 连到正确 esserver */
+function syncEventstoreVendorConfig() {
+  writeEventstoreConfigFromSync(SYNC_CONFIG_FILE);
+  invalidateEsclientModule();
+}
 
 function createServer() {
   const mime = {
@@ -587,15 +604,29 @@ ipcMain.handle('identity:get', async () => {
           }
         }
       } catch (_) {}
+      let privkeyHex = '';
+      const privkeyStr = typeof data.privkey === 'string' ? data.privkey.trim() : '';
+      if (privkeyStr && privkeyStr.startsWith('esec')) {
+        try {
+          if (!eventstoreKeyLib) {
+            // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+            eventstoreKeyLib = require('eventstore-tools/src/key');
+          }
+          const decoded = eventstoreKeyLib.esecDecode(privkeyStr);
+          const privBytes = (decoded && (decoded.data || decoded)) || decoded;
+          privkeyHex = secretBytesToHex(privBytes);
+        } catch (_) {}
+      }
       return {
         pubkey: pubkeyEpub || pubkeyHex || '',
         pubkeyHex,
         pubkeyEpub,
         privkey: typeof data.privkey === 'string' ? data.privkey : '',
+        privkeyHex,
       };
     }
   } catch (_) {}
-  return { pubkey: '', pubkeyHex: '', pubkeyEpub: '', privkey: '' };
+  return { pubkey: '', pubkeyHex: '', pubkeyEpub: '', privkey: '', privkeyHex: '' };
 });
 
 ipcMain.handle('identity:save', async (_event, payload) => {
@@ -666,7 +697,15 @@ ipcMain.handle('identity:save', async (_event, payload) => {
       privkey,
     };
     fs.writeFileSync(IDENTITY_FILE, JSON.stringify(toSave, null, 2), 'utf8');
-    return { ok: true, pubkeyHex, pubkeyEpub };
+    let privkeyHexOut = '';
+    if (privkey && privkey.startsWith('esec')) {
+      try {
+        const decoded = eventstoreKeyLib.esecDecode(privkey);
+        const privBytes = (decoded && (decoded.data || decoded)) || decoded;
+        privkeyHexOut = secretBytesToHex(privBytes);
+      } catch (_) {}
+    }
+    return { ok: true, pubkeyHex, pubkeyEpub, privkeyHex: privkeyHexOut };
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
@@ -685,8 +724,9 @@ ipcMain.handle('identity:generate', async () => {
     const pubkeyHex = getPublicKey(privBytes);
     const esec = esecEncode(privBytes);
     const epub = epubEncode(pubkeyHex);
+    const privkeyHex = secretBytesToHex(privBytes);
 
-    return { ok: true, esec, pubkeyHex, epub };
+    return { ok: true, esec, pubkeyHex, epub, privkeyHex };
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
@@ -706,7 +746,8 @@ ipcMain.handle('identity:deriveFromEsec', async (_event, esec) => {
     const privBytes = (decoded && (decoded.data || decoded)) || decoded;
     const pubkeyHex = getPublicKey(privBytes);
     const pubkeyEpub = epubEncode(pubkeyHex);
-    return { ok: true, pubkeyHex, pubkeyEpub };
+    const privkeyHex = secretBytesToHex(privBytes);
+    return { ok: true, pubkeyHex, pubkeyEpub, privkeyHex };
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
@@ -737,6 +778,7 @@ ipcMain.handle('identity:fetchProfile', async () => {
     const pubkey = pubkeyHex;
     if (!pubkey) return { ok: false, message: '请先保存用户密钥' };
 
+    syncEventstoreVendorConfig();
     return await fetchEventstoreProfile(esserver, pubkey);
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
@@ -775,6 +817,7 @@ ipcMain.handle('identity:registerOnServer', async (_event, payload) => {
     }
 
     const email = payload && typeof payload.email === 'string' ? payload.email.trim() : '';
+    syncEventstoreVendorConfig();
     return await registerUserOnServer(esserver, email, pubkeyHex, privkey);
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };
@@ -806,6 +849,7 @@ ipcMain.handle('identity:saveProfile', async (_event, profile) => {
     if (!pubkey || !privkey) return { ok: false, message: '请先保存用户密钥（含 ESEC）' };
 
     const payload = typeof profile === 'object' && profile !== null ? profile : {};
+    syncEventstoreVendorConfig();
     return await saveEventstoreProfile(esserver, pubkey, privkey, payload);
   } catch (e) {
     return { ok: false, message: e && e.message ? e.message : String(e) };

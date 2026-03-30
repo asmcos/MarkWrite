@@ -29,6 +29,107 @@ window.addEventListener('DOMContentLoaded', async () => {
   let identityPrefillNonce = 0;
   /** 服务器 profile 中的头像 URL，保存时原样写回（本页不再提供头像 URL 输入） */
   let profileServerAvatarUrl = '';
+  /** 「用户信息」页密钥展示：编码（epub / ESEC）或裸 hex */
+  let profileKeyDisplayMode = 'encoded';
+  const identityKeyHexCache = { pubkeyHex: '', privkeyHex: '' };
+
+  function refreshIdentityKeyHexCacheFromIdentity(id) {
+    if (!id || typeof id !== 'object') return;
+    if (typeof id.pubkeyHex === 'string' && id.pubkeyHex.trim()) identityKeyHexCache.pubkeyHex = id.pubkeyHex.trim();
+    if (typeof id.privkeyHex === 'string' && id.privkeyHex.trim()) identityKeyHexCache.privkeyHex = id.privkeyHex.trim();
+  }
+
+  function updateProfileKeyFormatUi() {
+    const encBtn = document.getElementById('settings-profile-key-format-encoded');
+    const hexBtn = document.getElementById('settings-profile-key-format-hex');
+    const pubLabel = document.getElementById('settings-profile-pubkey-label-text');
+    const privLabel = document.getElementById('settings-profile-privkey-label-text');
+    const isHex = profileKeyDisplayMode === 'hex';
+    if (encBtn) encBtn.classList.toggle('profile-form-key-format-btn--active', !isHex);
+    if (hexBtn) hexBtn.classList.toggle('profile-form-key-format-btn--active', isHex);
+    if (pubLabel) pubLabel.textContent = isHex ? '公钥（hex）' : '公钥（epub）';
+    if (privLabel) privLabel.textContent = isHex ? '私钥（hex）' : '私钥（ESEC）';
+  }
+
+  function updateProfileHeroNameDisplay(name) {
+    const heroNameEl = document.getElementById('settings-profile-hero-name');
+    if (!heroNameEl) return;
+    const v = typeof name === 'string' ? name.trim() : '';
+    heroNameEl.textContent = v || '未设置昵称';
+  }
+
+  function renderProfileAvatarPreview(url) {
+    const previewEl = document.getElementById('settings-profile-avatar-preview');
+    if (!previewEl) return;
+    previewEl.innerHTML = '';
+    const src = typeof url === 'string' ? url.trim() : '';
+    if (!src) {
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-person-fill profile-form-avatar-empty-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      previewEl.appendChild(icon);
+      return;
+    }
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.onerror = () => {
+      previewEl.innerHTML = '';
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-person-fill profile-form-avatar-empty-icon';
+      icon.setAttribute('aria-hidden', 'true');
+      previewEl.appendChild(icon);
+    };
+    previewEl.appendChild(img);
+  }
+
+  function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+      reader.onerror = () => reject(new Error('读取图片失败'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function applyProfileAvatarFile(file) {
+    if (!file) return false;
+    if (!file.type || !file.type.startsWith('image/')) {
+      showAppAlert('请选择图片文件（png/jpg/webp/gif）');
+      return false;
+    }
+    if (file.size > 3 * 1024 * 1024) {
+      showAppAlert('图片过大，请选择 3MB 以内的头像');
+      return false;
+    }
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      if (!dataUrl) throw new Error('图片数据为空');
+      profileServerAvatarUrl = dataUrl;
+      renderProfileAvatarPreview(profileServerAvatarUrl);
+      return true;
+    } catch (e) {
+      showAppAlert(`头像上传失败：${e && e.message ? e.message : String(e)}`);
+      return false;
+    }
+  }
+
+  function normalizeRemoteProfile(raw) {
+    const p = raw && typeof raw === 'object' ? raw : {};
+    const displayName = String(
+      p.displayName || p.display_name || p.name || p.nickname || p.nick || '',
+    ).trim();
+    const title = String(
+      p.title || p.jobTitle || p.job_title || p.role || '',
+    ).trim();
+    const bio = String(
+      p.bio || p.about || p.description || p.intro || '',
+    ).trim();
+    const avatarUrl = String(
+      p.avatarUrl || p.avatar_url || p.avatar || p.picture || p.image || '',
+    ).trim();
+    return { displayName, title, bio, avatarUrl };
+  }
 
   const PREVIEW_THEME_CSS = [
     'base.css',
@@ -83,6 +184,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const settingsIdentityEmailWrap = document.getElementById('settings-identity-email-wrap');
   const settingsIdentityGenerateMainBtn = document.getElementById('settings-identity-generate-main-btn');
   const settingsIdentitySaveBtn = document.getElementById('settings-identity-save-btn');
+  const settingsIdentityRegisterServerBtn = document.getElementById('settings-identity-register-server-btn');
   const settingsIdentityLogoutBtn = document.getElementById('settings-identity-logout-btn');
   const settingsIdentityProfileBlock = document.getElementById('settings-identity-profile-block');
   const settingsIdentityProfileLoading = document.getElementById('settings-identity-profile-loading');
@@ -98,6 +200,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const settingsProfileTitleInput = document.getElementById('settings-profile-title');
   const settingsProfileBioInput = document.getElementById('settings-profile-bio');
   const settingsProfileAvatarPreview = document.getElementById('settings-profile-avatar-preview');
+  const settingsProfileAvatarTrigger = document.getElementById('settings-profile-avatar-trigger');
+  const settingsProfileAvatarFileInput = document.getElementById('settings-profile-avatar-file');
   const settingsProfileSaveBtn = document.getElementById('settings-profile-save-btn');
   const settingsProfileBackBtn = document.getElementById('settings-profile-back-btn');
   const settingsIdentityCopyBtn = document.getElementById('settings-identity-copy-btn');
@@ -540,6 +644,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (privEl) {
           privEl.value = id.privkey || '';
         }
+        refreshIdentityKeyHexCacheFromIdentity(id);
         if (settingsIdentityEmptyHint) {
           settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
         }
@@ -616,6 +721,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (settingsIdentityLogoutBtn) {
       settingsIdentityLogoutBtn.style.display = identityHasExisting ? 'inline-flex' : 'none';
     }
+    if (settingsIdentityRegisterServerBtn) {
+      settingsIdentityRegisterServerBtn.style.display = identityHasExisting ? 'inline-flex' : 'none';
+    }
   }
 
   /** 新用户邮箱：基本格式（与常见 type=email 规则一致） */
@@ -669,12 +777,51 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   function syncProfileIdentityKeys() {
+    updateProfileKeyFormatUi();
     const pubEl = document.getElementById('settings-identity-pubkey');
     const privEl = document.getElementById('settings-identity-privkey');
     const pubDisplay = document.getElementById('settings-profile-pubkey-display');
     const privDisplay = document.getElementById('settings-profile-privkey-display');
-    if (pubDisplay) pubDisplay.value = (pubEl && pubEl.value) || '';
-    if (privDisplay) privDisplay.value = (privEl && privEl.value) || '';
+    if (!pubDisplay || !privDisplay) return;
+
+    if (profileKeyDisplayMode === 'encoded') {
+      pubDisplay.value = (pubEl && pubEl.value) || '';
+      privDisplay.value = (privEl && privEl.value) || '';
+      return;
+    }
+
+    const applyHexFromCache = () => {
+      pubDisplay.value = identityKeyHexCache.pubkeyHex || '';
+      privDisplay.value = identityKeyHexCache.privkeyHex || '';
+    };
+
+    if (identityKeyHexCache.pubkeyHex && identityKeyHexCache.privkeyHex) {
+      applyHexFromCache();
+      return;
+    }
+
+    const esec = (privEl && privEl.value.trim()) || '';
+    const finishHydrate = () => {
+      if (profileKeyDisplayMode !== 'hex') return;
+      applyHexFromCache();
+    };
+
+    if (esec.startsWith('esec') && window.markwrite?.api?.identityDeriveFromEsec) {
+      window.markwrite.api.identityDeriveFromEsec(esec).then((res) => {
+        if (res && res.ok) refreshIdentityKeyHexCacheFromIdentity(res);
+        finishHydrate();
+      }).catch(() => { finishHydrate(); });
+      applyHexFromCache();
+      return;
+    }
+
+    if (window.markwrite?.api?.identityGet) {
+      window.markwrite.api.identityGet().then((id) => {
+        refreshIdentityKeyHexCacheFromIdentity(id);
+        finishHydrate();
+      }).catch(() => { finishHydrate(); });
+    }
+    applyHexFromCache();
   }
 
   function loadProfileFormFromServer() {
@@ -683,31 +830,23 @@ window.addEventListener('DOMContentLoaded', async () => {
       const nameEl = document.getElementById('settings-profile-name');
       const titleEl = document.getElementById('settings-profile-title');
       const bioEl = document.getElementById('settings-profile-bio');
-      const previewEl = document.getElementById('settings-profile-avatar-preview');
       if (!res || !res.ok) return;
-      const p = res.profile;
-      if (!p) {
+      const p = normalizeRemoteProfile(res.profile);
+      if (!p.displayName && !p.title && !p.bio && !p.avatarUrl) {
         profileServerAvatarUrl = '';
-        if (previewEl) previewEl.innerHTML = '';
+        renderProfileAvatarPreview('');
+        updateProfileHeroNameDisplay('');
         if (nameEl) nameEl.value = '';
         if (titleEl) titleEl.value = '';
         if (bioEl) bioEl.value = '';
         return;
       }
-      if (nameEl) nameEl.value = p.displayName || p.name || '';
+      if (nameEl) nameEl.value = p.displayName || '';
       if (titleEl) titleEl.value = p.title || '';
       if (bioEl) bioEl.value = p.bio || '';
-      profileServerAvatarUrl = ((p.avatarUrl || p.avatar || '') + '').trim();
-      if (previewEl) {
-        previewEl.innerHTML = '';
-        if (profileServerAvatarUrl) {
-          const img = document.createElement('img');
-          img.src = profileServerAvatarUrl;
-          img.alt = '';
-          img.onerror = () => { previewEl.innerHTML = ''; };
-          previewEl.appendChild(img);
-        }
-      }
+      profileServerAvatarUrl = p.avatarUrl || '';
+      renderProfileAvatarPreview(profileServerAvatarUrl);
+      updateProfileHeroNameDisplay(p.displayName || '');
     }).catch(() => {});
   }
 
@@ -726,7 +865,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       startCheckProfile();
     }
     if (name === 'identity-profile') {
+      updateProfileHeroNameDisplay(settingsProfileNameInput && settingsProfileNameInput.value ? settingsProfileNameInput.value : '');
+      renderProfileAvatarPreview(profileServerAvatarUrl);
       syncProfileIdentityKeys();
+      startCheckProfile();
       return loadProfileFormFromServer();
     }
     return Promise.resolve();
@@ -753,10 +895,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
         return;
       }
-      const profile = res.profile;
-      if (profile && (profile.name || profile.nickname || profile.avatar)) {
+      const profile = normalizeRemoteProfile(res.profile);
+      if (profile.displayName || profile.avatarUrl || profile.bio || profile.title) {
         if (settingsIdentityProfileHas) {
-          settingsIdentityProfileName.textContent = profile.name || profile.nickname || '(已设置)';
+          settingsIdentityProfileName.textContent = profile.displayName || '(已设置)';
           settingsIdentityProfileHas.style.display = 'block';
         }
       } else {
@@ -876,6 +1018,8 @@ window.addEventListener('DOMContentLoaded', async () => {
               if (privOut) privOut.value = '';
               if (emailOut) emailOut.value = '';
               if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
+              identityKeyHexCache.pubkeyHex = '';
+              identityKeyHexCache.privkeyHex = '';
               identityLoginMode = 'paste';
               applyIdentityLoginMode();
               syncProfileIdentityKeys();
@@ -915,6 +1059,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         try {
           const res = await window.markwrite.api.identitySave(payload);
           if (res && res.ok) {
+            refreshIdentityKeyHexCacheFromIdentity(res);
             const emailForServer = identityLoginMode === 'new'
               ? (document.getElementById('settings-identity-email') && document.getElementById('settings-identity-email').value.trim()) || ''
               : '';
@@ -944,6 +1089,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         } catch (e) {
           showAppAlert(`保存身份失败：${e && e.message ? e.message : String(e)}`);
         }
+      })();
+    });
+  }
+
+  if (settingsIdentityRegisterServerBtn && window.markwrite?.api?.identityRegisterOnServer) {
+    settingsIdentityRegisterServerBtn.addEventListener('click', () => {
+      if (!identityHasExisting) return;
+      void (async () => {
+        const emailEl = document.getElementById('settings-identity-email');
+        let emailForServer = '';
+        if (emailEl && emailEl.value && isValidIdentityEmail(emailEl.value.trim())) {
+          emailForServer = emailEl.value.trim();
+        }
+        await runServerRegisterAfterLocalIdentity(emailForServer);
       })();
     });
   }
@@ -990,6 +1149,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       const pubEl = document.getElementById('settings-identity-pubkey');
       if (privEl) privEl.value = result.esec || '';
       if (pubEl) pubEl.value = result.epub || result.pubkeyHex || '';
+      refreshIdentityKeyHexCacheFromIdentity({
+        pubkeyHex: result.pubkeyHex,
+        privkeyHex: result.privkeyHex,
+      });
       if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'none';
       identityHasExisting = false;
       applyIdentityLoginMode();
@@ -1047,6 +1210,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       lastDerivedEsec = v;
       window.markwrite.api.identityDeriveFromEsec(v).then((res) => {
         if (!res || !res.ok) return;
+        refreshIdentityKeyHexCacheFromIdentity(res);
         const pubEl = document.getElementById('settings-identity-pubkey');
         if (pubEl) pubEl.value = res.pubkeyEpub || res.pubkeyHex || '';
         if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
@@ -1104,6 +1268,75 @@ window.addEventListener('DOMContentLoaded', async () => {
       copyProfileKey(settingsProfileCopyPrivkeyBtn, el && el.value);
     });
   }
+  const settingsProfileKeyFormatEncoded = document.getElementById('settings-profile-key-format-encoded');
+  const settingsProfileKeyFormatHex = document.getElementById('settings-profile-key-format-hex');
+  if (settingsProfileKeyFormatEncoded) {
+    settingsProfileKeyFormatEncoded.addEventListener('click', () => {
+      profileKeyDisplayMode = 'encoded';
+      syncProfileIdentityKeys();
+    });
+  }
+  if (settingsProfileKeyFormatHex) {
+    settingsProfileKeyFormatHex.addEventListener('click', () => {
+      profileKeyDisplayMode = 'hex';
+      syncProfileIdentityKeys();
+    });
+  }
+  const settingsProfileKeysToggleBtn = document.getElementById('settings-profile-keys-toggle');
+  if (settingsProfileKeysToggleBtn) {
+    settingsProfileKeysToggleBtn.addEventListener('click', () => {
+      const keysEl = document.getElementById('settings-profile-keys-section');
+      const textEl = settingsProfileKeysToggleBtn.querySelector('.profile-form-page-more-toggle-text');
+      if (!keysEl) return;
+      const nextExpanded = keysEl.hasAttribute('hidden');
+      if (nextExpanded) keysEl.removeAttribute('hidden');
+      else keysEl.setAttribute('hidden', '');
+      settingsProfileKeysToggleBtn.setAttribute('aria-expanded', nextExpanded ? 'true' : 'false');
+      if (textEl) {
+        textEl.innerHTML = nextExpanded
+          ? '<i class="bi bi-key-fill"></i> 收起密钥信息（公钥 / 私钥）'
+          : '<i class="bi bi-key"></i> 展开密钥信息（公钥 / 私钥）';
+      }
+      if (nextExpanded) {
+        syncProfileIdentityKeys();
+        keysEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+  if (settingsProfileNameInput) {
+    settingsProfileNameInput.addEventListener('input', () => {
+      updateProfileHeroNameDisplay(settingsProfileNameInput.value || '');
+    });
+  }
+  if (settingsProfileAvatarPreview) {
+    renderProfileAvatarPreview(profileServerAvatarUrl);
+  }
+  if (settingsProfileAvatarTrigger && settingsProfileAvatarFileInput) {
+    settingsProfileAvatarTrigger.addEventListener('click', () => {
+      settingsProfileAvatarFileInput.click();
+    });
+    settingsProfileAvatarTrigger.addEventListener('paste', (e) => {
+      const items = e.clipboardData && e.clipboardData.items ? Array.from(e.clipboardData.items) : [];
+      const imageItem = items.find((it) => it && it.type && it.type.startsWith('image/'));
+      if (!imageItem) return;
+      e.preventDefault();
+      const file = imageItem.getAsFile ? imageItem.getAsFile() : null;
+      if (!file) return;
+      void applyProfileAvatarFile(file);
+    });
+    settingsProfileAvatarTrigger.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      settingsProfileAvatarFileInput.click();
+    });
+    settingsProfileAvatarFileInput.addEventListener('change', () => {
+      const f = settingsProfileAvatarFileInput.files && settingsProfileAvatarFileInput.files[0];
+      if (!f) return;
+      void applyProfileAvatarFile(f).finally(() => {
+        settingsProfileAvatarFileInput.value = '';
+      });
+    });
+  }
   if (settingsProfileSaveBtn && window.markwrite?.api?.identitySaveProfile) {
     settingsProfileSaveBtn.addEventListener('click', () => {
       const displayName = (settingsProfileNameInput && settingsProfileNameInput.value.trim()) || '';
@@ -1125,6 +1358,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             : '';
           return window.markwrite.api.identitySave(payload).then(async (res) => {
             if (res && res.ok) {
+              refreshIdentityKeyHexCacheFromIdentity(res);
               identityHasExisting = true;
               applyIdentityLoginMode();
               await runServerRegisterAfterLocalIdentity(emailForReg);
