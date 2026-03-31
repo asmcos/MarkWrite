@@ -9,8 +9,9 @@
     "vendor:esclient": "node scripts/vendor-eventstore-esclient.mjs",
     "start": "npm run build:tailwind && npm run build:esclient && ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
     "sync-preview-theme": "node scripts/sync-preview-theme.mjs",
+    "linux:desktop": "node scripts/setup-linux-desktop.mjs",
     "update:openagent": "npm install openagent@git+https://github.com/asmcos/openagent.git --save-dev",
-    "setup": "npm run update:openagent && npm run sync-preview-theme && npm run vendor:esclient && npm run build:tailwind && npm run build:esclient"
+    "setup": "npm run update:openagent && npm run sync-preview-theme && npm run vendor:esclient && npm run build:tailwind && npm run build:esclient && npm run linux:desktop"
   },
   "keywords": [
     "markdown",
