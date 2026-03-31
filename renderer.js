@@ -29,9 +29,22 @@ window.addEventListener('DOMContentLoaded', async () => {
   let identityPrefillNonce = 0;
   /** 服务器 profile 中的头像 URL，保存时原样写回（本页不再提供头像 URL 输入） */
   let profileServerAvatarUrl = '';
+  /** 用户信息是否在本次会话中被用户修改过；若已修改则不自动用服务器数据覆盖 */
+  let profileDirtyInSession = false;
+  /** 仅当「新用户（邮箱）」模式点击过“生成新用户密钥”后为 true，用于决定是否需要向服务器注册 create_user */
+  let identityGeneratedThisSession = false;
   /** 「用户信息」页密钥展示：编码（epub / ESEC）或裸 hex */
   let profileKeyDisplayMode = 'encoded';
   const identityKeyHexCache = { pubkeyHex: '', privkeyHex: '' };
+  const composeState = {
+    mode: null,
+    draft: null,
+    tags: [],
+    draftFileId: null,
+    remoteId: '',
+    assetMap: {},
+  };
+  let activeComposeUploadRequestId = null;
 
   function refreshIdentityKeyHexCacheFromIdentity(id) {
     if (!id || typeof id !== 'object') return;
@@ -62,7 +75,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     const previewEl = document.getElementById('settings-profile-avatar-preview');
     if (!previewEl) return;
     previewEl.innerHTML = '';
-    const src = typeof url === 'string' ? url.trim() : '';
+    const raw = typeof url === 'string' ? url.trim() : '';
+    const src = raw ? resolveAvatarUrlForDisplay(raw) : '';
     if (!src) {
       const icon = document.createElement('i');
       icon.className = 'bi bi-person-fill profile-form-avatar-empty-icon';
@@ -92,6 +106,169 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  /** 居中裁成正方形，用于封面上传 */
+  function cropImageFileToSquareBlob(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        try {
+          const w = img.naturalWidth;
+          const h = img.naturalHeight;
+          const side = Math.min(w, h);
+          const sx = (w - side) / 2;
+          const sy = (h - side) / 2;
+          const canvas = document.createElement('canvas');
+          canvas.width = side;
+          canvas.height = side;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            URL.revokeObjectURL(url);
+            reject(new Error('canvas'));
+            return;
+          }
+          ctx.drawImage(img, sx, sy, side, side, 0, 0, side, side);
+          URL.revokeObjectURL(url);
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) reject(new Error('crop failed'));
+              else resolve(blob);
+            },
+            'image/png',
+            0.92,
+          );
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(e);
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('load image failed'));
+      };
+      img.src = url;
+    });
+  }
+
+  function normalizeComposeTag(s) {
+    return String(s || '')
+      .trim()
+      .replace(/^#/, '')
+      .replace(/\s+/g, ' ');
+  }
+
+  function renderComposeTags() {
+    const container = document.getElementById('content-compose-tags-list');
+    const hidden = document.getElementById('content-compose-tags');
+    if (!container) return;
+    container.innerHTML = '';
+    composeState.tags.forEach((tag, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'content-compose-tag-chip';
+      const text = document.createElement('span');
+      text.className = 'content-compose-tag-text';
+      text.textContent = tag;
+      chip.appendChild(text);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'content-compose-tag-remove';
+      btn.setAttribute('aria-label', '删除标签');
+      btn.innerHTML = '<i class="bi bi-x-lg"></i>';
+      btn.addEventListener('click', () => {
+        composeState.tags.splice(i, 1);
+        renderComposeTags();
+      });
+      chip.appendChild(btn);
+      container.appendChild(chip);
+    });
+    if (hidden) hidden.value = composeState.tags.join(', ');
+  }
+
+  function addComposeTagFromInput() {
+    const input = document.getElementById('content-compose-tag-input');
+    const v = normalizeComposeTag(input && input.value);
+    if (!v) return;
+    if (composeState.tags.includes(v)) {
+      if (input) input.value = '';
+      return;
+    }
+    composeState.tags.push(v);
+    if (input) input.value = '';
+    renderComposeTags();
+  }
+
+  function setComposeUploadProgress(text, kind) {
+    if (!contentComposeUploadProgress) return;
+    const msg = String(text || '').trim();
+    if (!msg) {
+      contentComposeUploadProgress.textContent = '';
+      contentComposeUploadProgress.style.display = 'none';
+      contentComposeUploadProgress.classList.remove('is-error');
+      return;
+    }
+    contentComposeUploadProgress.style.display = 'block';
+    contentComposeUploadProgress.textContent = msg;
+    contentComposeUploadProgress.classList.toggle('is-error', kind === 'error');
+  }
+
+  function readComposeDraftFromUi() {
+    const titleEl = document.getElementById('content-compose-main-title');
+    const coverEl = document.getElementById('content-compose-cover');
+    const extraEl = document.getElementById('content-compose-extra');
+    return {
+      title: (titleEl && titleEl.value.trim()) || '',
+      tags: composeState.tags.length ? composeState.tags.join(', ') : '',
+      cover: (coverEl && coverEl.value.trim()) || '',
+      extra: (extraEl && extraEl.value.trim()) || '',
+      content: editor ? editor.getValue() : '',
+    };
+  }
+
+  function toPublicUploadUrl(webPath) {
+    const rel = (webPath || '').trim();
+    if (!rel) return '';
+    if (/^https?:\/\//i.test(rel) || /^data:/i.test(rel) || /^blob:/i.test(rel)) return rel;
+    const active = getActiveSyncServer();
+    const uploadBase = active && typeof active.uploadpath === 'string' ? active.uploadpath.trim() : '';
+    if (!uploadBase) return rel;
+    let p = rel.replace(/^\//, '');
+    try {
+      const base = uploadBase.endsWith('/') ? uploadBase : `${uploadBase}/`;
+      const baseUrl = new URL(base);
+      const basePath = (baseUrl.pathname || '').replace(/\/+$/, '');
+      if (/\/uploads$/i.test(basePath) && /^uploads\//i.test(p)) {
+        p = p.replace(/^uploads\//i, '');
+      }
+      return String(new URL(p, base).href).replace(/\/uploads\/uploads\//gi, '/uploads/');
+    } catch (_) {
+      const b = uploadBase.replace(/\/+$/, '');
+      if (/\/uploads$/i.test(b) && /^uploads\//i.test(p)) {
+        p = p.replace(/^uploads\//i, '');
+      }
+      const joined = `${b}/${p}`.replace(/\/uploads\/uploads\//gi, '/uploads/');
+      return joined;
+    }
+  }
+
+  function renderComposeCoverPreview(url) {
+    if (!contentComposeCoverPreview) return;
+    contentComposeCoverPreview.innerHTML = '';
+    const src = (url || '').trim();
+    if (!src) {
+      const icon = document.createElement('i');
+      icon.className = 'bi bi-image';
+      contentComposeCoverPreview.appendChild(icon);
+      return;
+    }
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = '';
+    img.onerror = () => {
+      contentComposeCoverPreview.innerHTML = '<i class="bi bi-image"></i>';
+    };
+    contentComposeCoverPreview.appendChild(img);
+  }
+
   async function applyProfileAvatarFile(file) {
     if (!file) return false;
     if (!file.type || !file.type.startsWith('image/')) {
@@ -106,6 +283,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       const dataUrl = await fileToDataUrl(file);
       if (!dataUrl) throw new Error('图片数据为空');
       profileServerAvatarUrl = dataUrl;
+      profileDirtyInSession = true;
       renderProfileAvatarPreview(profileServerAvatarUrl);
       return true;
     } catch (e) {
@@ -171,6 +349,31 @@ window.addEventListener('DOMContentLoaded', async () => {
   const menuViewTogglePreview = document.getElementById('menu-view-toggle-preview');
   const menuViewToggleDevTools = document.getElementById('menu-view-toggle-devtools');
   const menuSettingsOpen = document.getElementById('menu-settings-open');
+  const menuContentNewBlog = document.getElementById('menu-content-new-blog');
+  const menuContentNewBook = document.getElementById('menu-content-new-book');
+  const menuContentMyBlog = document.getElementById('menu-content-my-blog');
+  const menuContentMyBook = document.getElementById('menu-content-my-book');
+  const menuContentDrafts = document.getElementById('menu-content-drafts');
+  const contentComposePanel = document.getElementById('content-compose-panel');
+  const contentComposeTitle = document.getElementById('content-compose-title');
+  const contentComposeSubtitle = document.getElementById('content-compose-subtitle');
+  const contentComposeMainTitle = document.getElementById('content-compose-main-title');
+  const contentComposeTagInput = document.getElementById('content-compose-tag-input');
+  const contentComposeTagAdd = document.getElementById('content-compose-tag-add');
+  const contentComposeCover = document.getElementById('content-compose-cover');
+  const contentComposeExtraWrap = document.getElementById('content-compose-extra-wrap');
+  const contentComposeExtra = document.getElementById('content-compose-extra');
+  const contentComposeGenerateTags = document.getElementById('content-compose-generate-tags');
+  const contentComposeGenerateSummary = document.getElementById('content-compose-generate-summary');
+  const contentComposeCoverUpload = document.getElementById('content-compose-cover-upload');
+  const contentComposeCoverScreenshot = document.getElementById('content-compose-cover-screenshot');
+  const contentComposeCoverFile = document.getElementById('content-compose-cover-file');
+  const contentComposeCoverPreview = document.getElementById('content-compose-cover-preview');
+  const contentComposeClose = document.getElementById('content-compose-close');
+  const contentComposeSaveDraft = document.getElementById('content-compose-save-draft');
+  const contentComposePublish = document.getElementById('content-compose-publish');
+  const contentComposeUploadProgress = document.getElementById('content-compose-upload-progress');
+  const paneEditor = document.getElementById('pane-editor');
   // 设置弹窗元素
   const settingsOverlay = document.getElementById('settings-overlay');
   const settingsCloseBtn = document.getElementById('settings-close-btn');
@@ -413,6 +616,28 @@ window.addEventListener('DOMContentLoaded', async () => {
     return syncServers.find((s) => s.id === activeSyncServerId) || syncServers[0] || null;
   }
 
+  /**
+   * 将服务器 profile 中的头像路径转为可展示的绝对 URL。
+   * 已是 http(s) / data / blob 的保持不变；相对路径则拼到当前 Sync 里配置的 Upload Base URL。
+   */
+  function resolveAvatarUrlForDisplay(raw) {
+    const s = typeof raw === 'string' ? raw.trim() : '';
+    if (!s) return '';
+    if (/^data:/i.test(s) || /^blob:/i.test(s)) return s;
+    if (/^https?:\/\//i.test(s) || /^\/\//.test(s)) return s;
+    const active = getActiveSyncServer();
+    const uploadBase = active && typeof active.uploadpath === 'string' ? active.uploadpath.trim() : '';
+    if (!uploadBase) return s;
+    try {
+      const base = uploadBase.endsWith('/') ? uploadBase : `${uploadBase}/`;
+      return new URL(s, base).href;
+    } catch (_) {
+      const b = uploadBase.replace(/\/$/, '');
+      const p = s.replace(/^\//, '');
+      return `${b}/${p}`;
+    }
+  }
+
   function renderSyncServerList() {
     if (!settingsSyncServerList) return;
     settingsSyncServerList.innerHTML = '';
@@ -445,6 +670,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (settingsUploadpath) settingsUploadpath.value = cur.uploadpath || '';
     if (settingsSitename) settingsSitename.value = cur.sitename || '';
     if (settingsDomain) settingsDomain.value = cur.domain || '';
+    if (currentSettingsTab === 'identity-profile') {
+      renderProfileAvatarPreview(profileServerAvatarUrl);
+    }
   }
 
   function saveFormToActive() {
@@ -456,6 +684,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (settingsSitename) cur.sitename = settingsSitename.value || '';
     if (settingsDomain) cur.domain = settingsDomain.value || '';
     renderSyncServerList();
+    if (currentSettingsTab === 'identity-profile') {
+      renderProfileAvatarPreview(profileServerAvatarUrl);
+    }
   }
 
   function getChatWidth() {
@@ -722,7 +953,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       settingsIdentityLogoutBtn.style.display = identityHasExisting ? 'inline-flex' : 'none';
     }
     if (settingsIdentityRegisterServerBtn) {
-      settingsIdentityRegisterServerBtn.style.display = identityHasExisting ? 'inline-flex' : 'none';
+      // 只有「新用户生成的 ESEC」才需要 create_user 注册；粘贴已有 ESEC 不需要
+      settingsIdentityRegisterServerBtn.style.display = (identityHasExisting && identityGeneratedThisSession) ? 'inline-flex' : 'none';
     }
   }
 
@@ -826,26 +1058,34 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   function loadProfileFormFromServer() {
     if (!window.markwrite?.api?.identityFetchProfile) return Promise.resolve();
+    const hasBufferedProfile = !!(
+      (settingsProfileNameInput && settingsProfileNameInput.value && settingsProfileNameInput.value.trim())
+      || (settingsProfileTitleInput && settingsProfileTitleInput.value && settingsProfileTitleInput.value.trim())
+      || (settingsProfileBioInput && settingsProfileBioInput.value && settingsProfileBioInput.value.trim())
+      || (profileServerAvatarUrl && String(profileServerAvatarUrl).trim())
+    );
+    if (profileDirtyInSession && hasBufferedProfile) {
+      // B 模式：本地已有会话缓冲时先展示当前内容，但仍继续发起一次请求（只是不覆盖）。
+      renderProfileAvatarPreview(profileServerAvatarUrl);
+      updateProfileHeroNameDisplay((settingsProfileNameInput && settingsProfileNameInput.value) || '');
+    }
     return window.markwrite.api.identityFetchProfile().then((res) => {
       console.log('[identity:fetchProfile] response:', res);
       const nameEl = document.getElementById('settings-profile-name');
       const titleEl = document.getElementById('settings-profile-title');
       const bioEl = document.getElementById('settings-profile-bio');
       if (!res || !res.ok) return;
+      // B 模式：从服务器拉取仅用于“有数据时填充”，不要因为网络超时/空返回把当前页面内容冲掉
+      if (!res.profile) return;
       const p = normalizeRemoteProfile(res.profile);
-      if (!p.displayName && !p.title && !p.bio && !p.avatarUrl) {
-        profileServerAvatarUrl = '';
-        renderProfileAvatarPreview('');
-        updateProfileHeroNameDisplay('');
-        if (nameEl) nameEl.value = '';
-        if (titleEl) titleEl.value = '';
-        if (bioEl) bioEl.value = '';
-        return;
-      }
+      if (!p.displayName && !p.title && !p.bio && !p.avatarUrl) return;
+      // B 模式：如果用户已经编辑了本地会话缓冲，避免被服务器结果覆盖。
+      if (profileDirtyInSession && hasBufferedProfile) return;
       if (nameEl) nameEl.value = p.displayName || '';
       if (titleEl) titleEl.value = p.title || '';
       if (bioEl) bioEl.value = p.bio || '';
       profileServerAvatarUrl = p.avatarUrl || '';
+      profileDirtyInSession = false;
       renderProfileAvatarPreview(profileServerAvatarUrl);
       updateProfileHeroNameDisplay(p.displayName || '');
     }).catch(() => {});
@@ -1012,6 +1252,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (res && res.ok) {
               identityPrefillNonce += 1;
               identityHasExisting = false;
+              identityGeneratedThisSession = false;
               const pubOut = document.getElementById('settings-identity-pubkey');
               const privOut = document.getElementById('settings-identity-privkey');
               const emailOut = document.getElementById('settings-identity-email');
@@ -1024,6 +1265,17 @@ window.addEventListener('DOMContentLoaded', async () => {
               identityLoginMode = 'paste';
               applyIdentityLoginMode();
               syncProfileIdentityKeys();
+              // 退出登录：清空本次会话的「用户信息」缓冲
+              profileDirtyInSession = false;
+              profileServerAvatarUrl = '';
+              const nameEl = document.getElementById('settings-profile-name');
+              const titleEl = document.getElementById('settings-profile-title');
+              const bioEl = document.getElementById('settings-profile-bio');
+              if (nameEl) nameEl.value = '';
+              if (titleEl) titleEl.value = '';
+              if (bioEl) bioEl.value = '';
+              updateProfileHeroNameDisplay('');
+              renderProfileAvatarPreview('');
               requestAnimationFrame(() => {
                 try {
                   const saveBtn = document.getElementById('settings-identity-save-btn');
@@ -1081,7 +1333,9 @@ window.addEventListener('DOMContentLoaded', async () => {
                   if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
                 }).catch(() => {});
               }
-              await runServerRegisterAfterLocalIdentity(emailForServer);
+              if (shouldRegisterOnServerAfterSave(emailForServer)) {
+                await runServerRegisterAfterLocalIdentity(emailForServer);
+              }
               startCheckProfile();
             }
           } else {
@@ -1102,6 +1356,14 @@ window.addEventListener('DOMContentLoaded', async () => {
         let emailForServer = '';
         if (emailEl && emailEl.value && isValidIdentityEmail(emailEl.value.trim())) {
           emailForServer = emailEl.value.trim();
+        }
+        if (!identityGeneratedThisSession) {
+          showAppAlert('只有「新用户（邮箱）」生成的新 ESEC 才需要向服务器注册。');
+          return;
+        }
+        if (!emailForServer) {
+          showAppAlert('请填写有效邮箱后再注册到服务器。');
+          return;
         }
         await runServerRegisterAfterLocalIdentity(emailForServer);
       })();
@@ -1127,6 +1389,12 @@ window.addEventListener('DOMContentLoaded', async () => {
         showCopyState('复制失败');
       });
     });
+  }
+
+  function shouldRegisterOnServerAfterSave(email) {
+    if (identityLoginMode !== 'new') return false;
+    if (!identityGeneratedThisSession) return false;
+    return typeof email === 'string' && email.trim().length > 0;
   }
 
   function handleGenerateIdentity() {
@@ -1156,6 +1424,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       });
       if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'none';
       identityHasExisting = false;
+      identityGeneratedThisSession = true;
       applyIdentityLoginMode();
       // 新用户生成后不自动保存，用户可继续完善资料后点击上传再保存
       if (settingsIdentityProfileSetBtn) {
@@ -1173,6 +1442,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (settingsIdentityModePasteBtn) {
     settingsIdentityModePasteBtn.addEventListener('click', () => {
       identityLoginMode = 'paste';
+      identityGeneratedThisSession = false;
       applyIdentityLoginMode();
       const priv = document.getElementById('settings-identity-privkey');
       if (priv) {
@@ -1187,6 +1457,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (settingsIdentityModeNewBtn) {
     settingsIdentityModeNewBtn.addEventListener('click', () => {
       identityLoginMode = 'new';
+      identityGeneratedThisSession = false;
       applyIdentityLoginMode();
       const email = document.getElementById('settings-identity-email');
       if (email) {
@@ -1205,6 +1476,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       const t = e.target;
       if (!t || t.id !== 'settings-identity-privkey') return;
       if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
+      // 手工粘贴/编辑 ESEC（区别于“生成新用户密钥”）不应触发服务器注册
+      identityGeneratedThisSession = false;
       const v = (t.value || '').trim();
       if (!v || !v.startsWith('esec') || v === lastDerivedEsec) return;
       if (v.length < 10) return;
@@ -1306,7 +1579,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (settingsProfileNameInput) {
     settingsProfileNameInput.addEventListener('input', () => {
+      profileDirtyInSession = true;
       updateProfileHeroNameDisplay(settingsProfileNameInput.value || '');
+    });
+  }
+  if (settingsProfileTitleInput) {
+    settingsProfileTitleInput.addEventListener('input', () => {
+      profileDirtyInSession = true;
+    });
+  }
+  if (settingsProfileBioInput) {
+    settingsProfileBioInput.addEventListener('input', () => {
+      profileDirtyInSession = true;
     });
   }
   if (settingsProfileAvatarPreview) {
@@ -1338,48 +1622,19 @@ window.addEventListener('DOMContentLoaded', async () => {
       });
     });
   }
-  if (settingsProfileSaveBtn && window.markwrite?.api?.identitySaveProfile) {
+  if (settingsProfileSaveBtn) {
     settingsProfileSaveBtn.addEventListener('click', () => {
       const displayName = (settingsProfileNameInput && settingsProfileNameInput.value.trim()) || '';
       const title = (settingsProfileTitleInput && settingsProfileTitleInput.value.trim()) || '';
       const avatarUrl = (profileServerAvatarUrl || '').trim();
       const bio = (settingsProfileBioInput && settingsProfileBioInput.value.trim()) || '';
       const profile = { displayName, title, avatarUrl, bio };
-      const ensureIdentitySaved = () => {
-        if (identityHasExisting || !window.markwrite?.api?.identitySave) return Promise.resolve({ ok: true });
-        return assertIdentityInputsCanSave().then(() => {
-          const pubEl = document.getElementById('settings-identity-pubkey');
-          const privEl = document.getElementById('settings-identity-privkey');
-          const payload = {
-            pubkey: pubEl ? pubEl.value.trim() : '',
-            privkey: privEl ? privEl.value.trim() : '',
-          };
-          const emailForReg = identityLoginMode === 'new'
-            ? (document.getElementById('settings-identity-email') && document.getElementById('settings-identity-email').value.trim()) || ''
-            : '';
-          return window.markwrite.api.identitySave(payload).then(async (res) => {
-            if (res && res.ok) {
-              refreshIdentityKeyHexCacheFromIdentity(res);
-              identityHasExisting = true;
-              applyIdentityLoginMode();
-              await runServerRegisterAfterLocalIdentity(emailForReg);
-              return res;
-            }
-            throw new Error((res && res.message) || '保存身份失败');
-          });
-        });
-      };
-
-      ensureIdentitySaved().then(() => window.markwrite.api.identitySaveProfile(profile)).then((res) => {
-        if (res && res.ok) {
-          switchSettingsTab('identity-login');
-          startCheckProfile();
-        } else {
-          showAppAlert(res && res.message ? res.message : '保存失败');
-        }
-      }).catch((e) => {
-        showAppAlert(`保存失败：${e && e.message ? e.message : String(e)}`);
-      });
+      // B 模式：不保存到服务器，仅在本次会话缓存（profileDirtyInSession 保持为 true）
+      profileDirtyInSession = true;
+      updateProfileHeroNameDisplay(displayName);
+      renderProfileAvatarPreview(profileServerAvatarUrl);
+      console.log('[profile] cached in session:', profile);
+      showAppAlert('已缓存（仅本次会话有效，不会上传服务器）。');
     });
   }
 
@@ -1431,6 +1686,474 @@ window.addEventListener('DOMContentLoaded', async () => {
       activeSyncServerId = srv.id;
       renderSyncServerList();
       fillSyncFormFromActive();
+    });
+  }
+
+  function syncComposeModeUi(mode) {
+    if (mode === 'blog') {
+      if (contentComposeTitle) contentComposeTitle.textContent = '创作新博客';
+      if (contentComposeSubtitle) contentComposeSubtitle.textContent = '使用下方 Markdown 工具栏与 Monaco 编辑正文';
+      if (contentComposeExtraWrap) contentComposeExtraWrap.style.display = 'grid';
+      if (contentComposeExtra) contentComposeExtra.placeholder = '博客简介（可选）';
+      setFilename('未发布-blog.md');
+    } else {
+      if (contentComposeTitle) contentComposeTitle.textContent = '创作新书籍';
+      if (contentComposeSubtitle) contentComposeSubtitle.textContent = '编写书籍内容，后续可扩展章节结构';
+      if (contentComposeExtraWrap) contentComposeExtraWrap.style.display = 'grid';
+      if (contentComposeExtra) contentComposeExtra.placeholder = '书籍简介（可选）';
+      setFilename('未发布-book.md');
+    }
+  }
+
+  function applyLoadedComposeDraft(d) {
+    if (!d || typeof d !== 'object') return;
+    composeState.draftFileId = d.id || null;
+    composeState.remoteId = typeof d.remoteId === 'string' ? d.remoteId : '';
+    composeState.assetMap = (d && typeof d.assetMap === 'object' && d.assetMap) ? d.assetMap : {};
+    const t = d.tags;
+    if (Array.isArray(t)) {
+      composeState.tags = t.map((x) => normalizeComposeTag(String(x || ''))).filter(Boolean);
+    } else if (typeof t === 'string') {
+      composeState.tags = t
+        .split(/[，,、]/)
+        .map((s) => normalizeComposeTag(s))
+        .filter(Boolean);
+    } else {
+      composeState.tags = [];
+    }
+    renderComposeTags();
+    if (contentComposeMainTitle) contentComposeMainTitle.value = d.title || '';
+    if (contentComposeCover) contentComposeCover.value = d.cover || '';
+    renderComposeCoverPreview(toPublicUploadUrl(d.cover || ''));
+    if (contentComposeExtra) contentComposeExtra.value = d.extra || '';
+    if (editor) editor.setValue(typeof d.content === 'string' ? d.content : '');
+  }
+
+  function enterContentCompose(mode) {
+    if (!contentComposePanel || !editor) return;
+    if (!composeState.mode) {
+      composeState.draft = {
+        filename: currentFilePath,
+        value: editor.getValue(),
+      };
+    }
+    composeState.mode = mode;
+    composeState.draftFileId = null;
+    composeState.remoteId = '';
+    composeState.assetMap = {};
+    contentComposePanel.style.display = 'block';
+    syncComposeModeUi(mode);
+    if (contentComposeMainTitle) contentComposeMainTitle.value = '';
+    composeState.tags = [];
+    renderComposeTags();
+    if (contentComposeCover) contentComposeCover.value = '';
+    if (contentComposeExtra) contentComposeExtra.value = '';
+    renderComposeCoverPreview('');
+    setComposeUploadProgress('');
+    editor.setValue('');
+    if (paneEditor) paneEditor.dataset.composeOpen = '1';
+    editor.focus();
+  }
+
+  function exitContentCompose() {
+    if (!contentComposePanel || !editor) return;
+    contentComposePanel.style.display = 'none';
+    if (paneEditor) delete paneEditor.dataset.composeOpen;
+    const prev = composeState.draft;
+    composeState.mode = null;
+    composeState.draft = null;
+    composeState.draftFileId = null;
+    composeState.remoteId = '';
+    composeState.assetMap = {};
+    activeComposeUploadRequestId = null;
+    setComposeUploadProgress('');
+    if (prev) {
+      setFilename(prev.filename || null);
+      editor.setValue(prev.value || '');
+    }
+  }
+
+  async function openComposeDraftById(id) {
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.composeDraftsLoad !== 'function') {
+      showAppAlert('草稿加载接口不可用');
+      return;
+    }
+    const res = await api.composeDraftsLoad(id);
+    if (!res || !res.ok || !res.draft) {
+      showAppAlert((res && res.error) || '加载草稿失败');
+      return;
+    }
+    const d = res.draft;
+    const mode = d.mode === 'book' ? 'book' : 'blog';
+    if (!composeState.mode) {
+      if (!contentComposePanel || !editor) return;
+      composeState.draft = {
+        filename: currentFilePath,
+        value: editor.getValue(),
+      };
+      composeState.mode = mode;
+      contentComposePanel.style.display = 'block';
+      if (paneEditor) paneEditor.dataset.composeOpen = '1';
+    } else {
+      composeState.mode = mode;
+    }
+    syncComposeModeUi(mode);
+    applyLoadedComposeDraft(d);
+    editor.focus();
+  }
+
+  const composeDraftsOverlay = document.getElementById('compose-drafts-overlay');
+  const composeDraftsListEl = document.getElementById('compose-drafts-list');
+  const composeDraftsEmptyEl = document.getElementById('compose-drafts-empty');
+  const composeDraftsCloseBtn = document.getElementById('compose-drafts-close');
+
+  function closeComposeDraftsModal() {
+    if (composeDraftsOverlay) composeDraftsOverlay.style.display = 'none';
+  }
+
+  function formatDraftTime(ts) {
+    const n = typeof ts === 'number' ? ts : 0;
+    if (!n) return '';
+    try {
+      const d = new Date(n);
+      return d.toLocaleString();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  async function refreshComposeDraftsList() {
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.composeDraftsList !== 'function' || !composeDraftsListEl) return;
+    const res = await api.composeDraftsList();
+    const drafts = (res && res.ok && Array.isArray(res.drafts)) ? res.drafts : [];
+    composeDraftsListEl.innerHTML = '';
+    if (composeDraftsEmptyEl) {
+      composeDraftsEmptyEl.style.display = drafts.length ? 'none' : 'block';
+    }
+    drafts.forEach((row) => {
+      const li = document.createElement('li');
+      li.className = 'compose-drafts-item';
+      li.tabIndex = 0;
+      li.title = '点击打开草稿';
+      const isBook = row.mode === 'book';
+      const modeLabel = isBook ? '书籍' : '博客';
+
+      const badge = document.createElement('span');
+      badge.className = `compose-drafts-item-badge ${isBook ? 'is-book' : 'is-blog'}`;
+      badge.setAttribute('aria-hidden', 'true');
+      const badgeIcon = document.createElement('i');
+      badgeIcon.className = isBook ? 'bi bi-book' : 'bi bi-journal-text';
+      badge.appendChild(badgeIcon);
+
+      const body = document.createElement('div');
+      body.className = 'compose-drafts-item-body';
+      const title = document.createElement('div');
+      title.className = 'compose-drafts-item-title';
+      title.textContent = (row.title && String(row.title).trim()) || '（无标题）';
+      const meta = document.createElement('div');
+      meta.className = 'compose-drafts-item-meta';
+      const timeStr = formatDraftTime(row.updatedAt);
+      const hasRemote = !!(row && row.remoteId && String(row.remoteId).trim());
+      const assetCount = Number(row && row.assetCount ? row.assetCount : 0);
+      const publishTag = hasRemote
+        ? '<span class="compose-drafts-item-flag is-linked"><i class="bi bi-cloud-check"></i>已上传（有ID）</span>'
+        : '<span class="compose-drafts-item-flag is-unlinked"><i class="bi bi-cloud-slash"></i>未上传（无ID）</span>';
+      const assetsTag = `<span class="compose-drafts-item-flag is-assets"><i class="bi bi-images"></i>图片已上传 ${assetCount}</span>`;
+      meta.innerHTML = `<span class="compose-drafts-item-mode">${modeLabel}</span><span class="compose-drafts-item-sep">·</span><span class="compose-drafts-item-time"><i class="bi bi-clock" aria-hidden="true"></i>${timeStr || '—'}</span>${publishTag}${assetsTag}`;
+
+      body.appendChild(title);
+      body.appendChild(meta);
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'compose-drafts-item-del';
+      delBtn.title = '删除';
+      delBtn.setAttribute('aria-label', '删除草稿');
+      delBtn.innerHTML = '<i class="bi bi-trash"></i>';
+      delBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (typeof api.composeDraftsDelete !== 'function') return;
+        const ok = window.confirm('确定删除这条草稿？');
+        if (!ok) return;
+        const r = await api.composeDraftsDelete(row.id);
+        if (r && r.ok) {
+          if (composeState.draftFileId === row.id) composeState.draftFileId = null;
+          await refreshComposeDraftsList();
+        } else {
+          showAppAlert((r && r.error) || '删除失败');
+        }
+      });
+
+      const openDraft = async () => {
+        await openComposeDraftById(row.id);
+        closeComposeDraftsModal();
+      };
+      li.addEventListener('click', async (e) => {
+        if (e.target.closest('button')) return;
+        await openDraft();
+      });
+      li.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          void openDraft();
+        }
+      });
+
+      li.appendChild(badge);
+      li.appendChild(body);
+      li.appendChild(delBtn);
+      composeDraftsListEl.appendChild(li);
+    });
+  }
+
+  async function openComposeDraftsModal() {
+    if (!composeDraftsOverlay) return;
+    composeDraftsOverlay.style.display = 'flex';
+    await refreshComposeDraftsList();
+  }
+
+  if (window.markwrite?.api?.onComposeUploadProgress) {
+    window.markwrite.api.onComposeUploadProgress((evt) => {
+      if (!evt || typeof evt !== 'object') return;
+      if (!activeComposeUploadRequestId || evt.requestId !== activeComposeUploadRequestId) return;
+      const total = Number(evt.totalFiles || 0);
+      const done = Number(evt.completedFiles || 0);
+      const pct = Number(evt.overallPercent || 0);
+      if (evt.phase === 'error') {
+        setComposeUploadProgress(`上传失败：${evt.message || '未知错误'}`, 'error');
+        return;
+      }
+      if (evt.phase === 'done') {
+        setComposeUploadProgress(`图片上传完成：${done}/${total}（${pct}%）`);
+        return;
+      }
+      if (evt.phase === 'start' || evt.phase === 'file_start' || evt.phase === 'file_progress' || evt.phase === 'file_done') {
+        const msg = evt.message || `上传进度：${done}/${total}（${pct}%）`;
+        setComposeUploadProgress(msg);
+      }
+    });
+  }
+
+  if (menuContentNewBlog) menuContentNewBlog.addEventListener('click', () => enterContentCompose('blog'));
+  if (menuContentNewBook) menuContentNewBook.addEventListener('click', () => enterContentCompose('book'));
+  if (menuContentDrafts) menuContentDrafts.addEventListener('click', () => openComposeDraftsModal());
+  if (composeDraftsCloseBtn) composeDraftsCloseBtn.addEventListener('click', () => closeComposeDraftsModal());
+  if (composeDraftsOverlay) {
+    composeDraftsOverlay.addEventListener('click', (e) => {
+      if (e.target === composeDraftsOverlay) closeComposeDraftsModal();
+    });
+  }
+  if (menuContentMyBlog) menuContentMyBlog.addEventListener('click', () => showAppAlert('我的 Blog 列表下一步接入。'));
+  if (menuContentMyBook) menuContentMyBook.addEventListener('click', () => showAppAlert('我的书籍列表下一步接入。'));
+  if (contentComposeClose) contentComposeClose.addEventListener('click', exitContentCompose);
+  if (contentComposeCoverUpload && contentComposeCoverFile) {
+    contentComposeCoverUpload.addEventListener('click', () => contentComposeCoverFile.click());
+    contentComposeCoverFile.addEventListener('change', async () => {
+      const f = contentComposeCoverFile.files && contentComposeCoverFile.files[0];
+      if (!f) return;
+      try {
+        if (!window.markwrite?.api?.uploadPastedImage) return;
+        let blob;
+        try {
+          blob = await cropImageFileToSquareBlob(f);
+        } catch (e) {
+          showAppAlert(`图片处理失败：${e && e.message ? e.message : String(e)}`);
+          return;
+        }
+        const buf = await blob.arrayBuffer();
+        const res = await window.markwrite.api.uploadPastedImage({
+          data: Array.from(new Uint8Array(buf)),
+          ext: 'png',
+          name: 'cover.png',
+        });
+        if (!res || !res.ok || !res.webPath) {
+          showAppAlert((res && res.error) || '封面上传失败');
+          return;
+        }
+        const url = toPublicUploadUrl(res.webPath);
+        if (contentComposeCover) contentComposeCover.value = url;
+        renderComposeCoverPreview(url);
+      } finally {
+        contentComposeCoverFile.value = '';
+      }
+    });
+  }
+  if (contentComposeCoverScreenshot) {
+    contentComposeCoverScreenshot.addEventListener('click', async () => {
+      if (!window.markwrite?.api?.uploadClipboardImage) return;
+      const res = await window.markwrite.api.uploadClipboardImage();
+      if (!res || !res.ok || !res.webPath) {
+        showAppAlert((res && res.error) || '剪贴板没有可用图片');
+        return;
+      }
+      const url = toPublicUploadUrl(res.webPath);
+      if (contentComposeCover) contentComposeCover.value = url;
+      renderComposeCoverPreview(url);
+      showAppAlert('已设为封面。');
+    });
+  }
+  if (contentComposeGenerateSummary) {
+    contentComposeGenerateSummary.addEventListener('click', async () => {
+      if (!window.markwrite?.api?.aiChat) return;
+      const title = (contentComposeMainTitle && contentComposeMainTitle.value.trim()) || '';
+      const content = editor ? editor.getValue() : '';
+      if (!title && !content.trim()) {
+        showAppAlert('请先输入标题或正文，再生成简介。');
+        return;
+      }
+      const prompt = `请根据以下内容生成 1 句中文简介（不超过40字，不加引号）。\n标题：${title}\n正文：\n${content.slice(0, 3000)}`;
+      const result = await window.markwrite.api.aiChat(prompt, { scene: 'compose-summary' });
+      const text = result && result.text ? String(result.text).trim() : '';
+      if (!text) {
+        showAppAlert((result && result.error) || '简介生成失败，请重试');
+        return;
+      }
+      if (contentComposeExtra) contentComposeExtra.value = text.replace(/\n+/g, ' ').trim();
+    });
+  }
+  if (contentComposeGenerateTags) {
+    contentComposeGenerateTags.addEventListener('click', async () => {
+      if (!window.markwrite?.api?.aiChat) return;
+      const title = (contentComposeMainTitle && contentComposeMainTitle.value.trim()) || '';
+      const content = editor ? editor.getValue() : '';
+      if (!title && !content.trim()) {
+        showAppAlert('请先输入标题或正文，再生成标签。');
+        return;
+      }
+      const prompt = `请基于以下博客/书籍内容生成恰好 3 个中文标签，使用逗号分隔，只输出标签本身，不要编号或解释。\n标题：${title}\n正文：\n${content.slice(0, 3000)}`;
+      const result = await window.markwrite.api.aiChat(prompt, { scene: 'compose-tags' });
+      const raw = result && result.text ? String(result.text) : '';
+      if (!raw.trim()) {
+        showAppAlert((result && result.error) || '标签生成失败，请重试');
+        return;
+      }
+      const tags = raw
+        .replace(/\n/g, ',')
+        .split(/[，,、]/)
+        .map((s) => normalizeComposeTag(s))
+        .filter(Boolean)
+        .slice(0, 3);
+      composeState.tags = tags;
+      renderComposeTags();
+    });
+  }
+  if (contentComposeTagAdd) {
+    contentComposeTagAdd.addEventListener('click', () => addComposeTagFromInput());
+  }
+  if (contentComposeTagInput) {
+    contentComposeTagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addComposeTagFromInput();
+      }
+    });
+  }
+  if (contentComposeSaveDraft) {
+    contentComposeSaveDraft.addEventListener('click', async () => {
+      const api = window.markwrite && window.markwrite.api;
+      if (!api || typeof api.composeDraftsSave !== 'function') {
+        showAppAlert('草稿保存不可用（请使用桌面版）');
+        return;
+      }
+      if (!composeState.mode) {
+        showAppAlert('请先通过「新建 Blog / 新建书籍」进入创作页');
+        return;
+      }
+      const ui = readComposeDraftFromUi();
+      const res = await api.composeDraftsSave({
+        id: composeState.draftFileId || undefined,
+        mode: composeState.mode || 'blog',
+        title: ui.title,
+        tags: composeState.tags.slice(),
+        cover: ui.cover,
+        extra: ui.extra,
+        content: ui.content,
+        remoteId: composeState.remoteId || '',
+        assetMap: composeState.assetMap || {},
+      });
+      if (res && res.ok && res.id) {
+        composeState.draftFileId = res.id;
+        showAppAlert('草稿已保存');
+      } else {
+        showAppAlert((res && res.error) || '保存草稿失败');
+      }
+    });
+  }
+  if (contentComposePublish) {
+    contentComposePublish.addEventListener('click', () => {
+      const payload = {
+        mode: composeState.mode || 'blog',
+        ...readComposeDraftFromUi(),
+      };
+      if (!payload.title) {
+        showAppAlert('请先填写标题');
+        if (contentComposeMainTitle) contentComposeMainTitle.focus();
+        return;
+      }
+      (async () => {
+        const api = window.markwrite && window.markwrite.api;
+        if (!api || typeof api.composeUploadAssetsAndFixPaths !== 'function') {
+          console.log('[compose:publish]', payload);
+          showAppAlert('发布前图片上传不可用（请使用桌面版）');
+          return;
+        }
+        activeComposeUploadRequestId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        setComposeUploadProgress('正在扫描并上传图片…');
+        const fixed = await api.composeUploadAssetsAndFixPaths({
+          requestId: activeComposeUploadRequestId,
+          cover: payload.cover || '',
+          content: payload.content || '',
+          assetMap: composeState.assetMap || {},
+        });
+        if (!fixed || !fixed.ok) {
+          setComposeUploadProgress(`上传失败：${(fixed && fixed.message) || '未知错误'}`, 'error');
+          activeComposeUploadRequestId = null;
+          return;
+        }
+        activeComposeUploadRequestId = null;
+        const next = {
+          ...payload,
+          cover: fixed.cover || payload.cover,
+          content: fixed.content || payload.content,
+          remoteId: composeState.remoteId || '',
+        };
+        const uploadedCount = Object.keys(fixed.uploaded || {}).length;
+        if (fixed.assetMap && typeof fixed.assetMap === 'object') {
+          composeState.assetMap = fixed.assetMap;
+        }
+        setComposeUploadProgress(`图片处理完成：${uploadedCount} 张已替换（可复用），正在发布…`);
+        if (typeof api.composeCreateContent !== 'function') {
+          console.log('[compose:publish]', next, { uploaded: fixed.uploaded || {} });
+          showAppAlert('创建内容接口不可用');
+          return;
+        }
+        const created = await api.composeCreateContent(next);
+        if (!created || !created.ok) {
+          showAppAlert((created && created.message) || '发布失败');
+          return;
+        }
+        if (created.id) composeState.remoteId = created.id;
+        // 写回草稿：记录远端 id + 图片映射，下一次发布可 update 且跳过重复上传
+        if (composeState.draftFileId && typeof api.composeDraftsSave === 'function') {
+          const ui2 = readComposeDraftFromUi();
+          await api.composeDraftsSave({
+            id: composeState.draftFileId,
+            mode: composeState.mode || 'blog',
+            title: ui2.title,
+            tags: composeState.tags.slice(),
+            cover: ui2.cover,
+            extra: ui2.extra,
+            content: ui2.content,
+            remoteId: composeState.remoteId || '',
+            assetMap: composeState.assetMap || {},
+          });
+        }
+        console.log('[compose:publish:success]', next, { uploaded: fixed.uploaded || {}, created });
+        setComposeUploadProgress(`发布完成：${uploadedCount} 张图片已上传并替换。`);
+        showAppAlert(`发布成功${created.id ? `（ID: ${created.id}）` : ''}`);
+      })();
     });
   }
 

@@ -57,6 +57,17 @@
             <button type="button" id="menu-settings-open">Open Settings…</button>
           </div>
         </div>
+        <div class="menu-root">
+          <button type="button" class="menu-root-btn">Content</button>
+          <div class="menu-dropdown">
+            <button type="button" id="menu-content-new-blog">新建 Blog</button>
+            <button type="button" id="menu-content-new-book">新建书籍</button>
+            <button type="button" id="menu-content-drafts">草稿箱</button>
+            <hr />
+            <button type="button" id="menu-content-my-blog">我的 Blog</button>
+            <button type="button" id="menu-content-my-book">我的书籍</button>
+          </div>
+        </div>
       </div>
       <div class="menu-bar-right">
         <!-- 预留将来放快速入口，例如同步状态等 -->
@@ -97,6 +108,40 @@
           </span>
         </div>
         <div class="pane-body">
+          <div class="content-compose-panel" id="content-compose-panel" style="display:none;">
+            <div class="content-compose-head">
+              <div>
+                <h3 class="content-compose-title" id="content-compose-title">创作内容</h3>
+                <p class="content-compose-subtitle" id="content-compose-subtitle">在下方编辑器中撰写正文</p>
+              </div>
+              <button type="button" class="content-compose-close" id="content-compose-close" title="退出创作页">
+                <i class="bi bi-x-lg"></i>
+              </button>
+            </div>
+            <div class="content-compose-grid content-compose-grid--top">
+              <div class="content-compose-field">
+                <label for="content-compose-main-title">标题</label>
+                <input id="content-compose-main-title" type="text" placeholder="请输入标题" maxlength="120" />
+              </div>
+              <div class="content-compose-field content-compose-cover-field">
+                <label>封面（正方形）</label>
+                <div class="content-compose-cover-row">
+                  <div class="content-compose-cover-preview" id="content-compose-cover-preview" title="上传或截图">
+                    <i class="bi bi-image"></i>
+                  </div>
+                  <div class="content-compose-cover-side">
+                    <div class="content-compose-cover-actions">
+                      <button type="button" class="content-compose-mini-btn" id="content-compose-cover-upload">上传图片</button>
+                      <button type="button" class="content-compose-mini-btn" id="content-compose-cover-screenshot">截图粘贴</button>
+                    </div>
+                    <p class="content-compose-cover-hint">仅支持上传或剪贴板截图，预览为居中裁剪的正方形。</p>
+                    <input id="content-compose-cover-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />
+                    <input type="hidden" id="content-compose-cover" value="" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="editor-with-preview" id="editor-with-preview" data-preview="closed">
             <div class="md-editor-column">
               <div class="md-toolbar">
@@ -135,6 +180,39 @@
               </div>
               <div id="md-preview" class="md-preview-body">预览将显示在这里…</div>
             </div>
+          </div>
+          <div class="content-compose-bottom-tools">
+            <div class="content-compose-field">
+              <label for="content-compose-tag-input">标签</label>
+              <div class="content-compose-tags-editor">
+                <div class="content-compose-tags-list" id="content-compose-tags-list"></div>
+                <div class="content-compose-tags-add-row">
+                  <input
+                    type="text"
+                    id="content-compose-tag-input"
+                    class="content-compose-tag-input"
+                    placeholder="输入标签，回车或点击添加"
+                    maxlength="32"
+                    autocomplete="off"
+                  />
+                  <button type="button" class="content-compose-mini-btn" id="content-compose-tag-add">添加</button>
+                </div>
+              </div>
+              <input type="hidden" id="content-compose-tags" value="" />
+            </div>
+            <div class="content-compose-field" id="content-compose-extra-wrap">
+              <label for="content-compose-extra">简介</label>
+              <textarea id="content-compose-extra" rows="4" placeholder="内容简介（可选）"></textarea>
+            </div>
+            <div class="content-compose-generate-actions">
+              <button type="button" class="content-compose-mini-btn" id="content-compose-generate-tags">生成标签</button>
+              <button type="button" class="content-compose-mini-btn" id="content-compose-generate-summary">生成简介</button>
+            </div>
+            <div class="content-compose-actions">
+              <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="content-compose-save-draft">保存草稿</button>
+              <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="content-compose-publish">发布</button>
+            </div>
+            <div class="content-compose-upload-progress" id="content-compose-upload-progress" style="display:none;"></div>
           </div>
         </div>
       </div>
@@ -181,6 +259,19 @@
       <div class="statusbar-right">
         <span>MarkWrite · Shell v0.1</span>
         <span>AI: not configured</span>
+      </div>
+    </div>
+    <div class="compose-drafts-overlay" id="compose-drafts-overlay" style="display:none;">
+      <div class="compose-drafts-box">
+        <div class="compose-drafts-header">
+          <span class="compose-drafts-title">草稿箱</span>
+          <button type="button" class="compose-drafts-close" id="compose-drafts-close" title="关闭">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <p class="compose-drafts-hint">本地保存在应用数据目录。点击一条草稿即可打开；也可按 Enter。</p>
+        <ul class="compose-drafts-list" id="compose-drafts-list"></ul>
+        <div class="compose-drafts-empty" id="compose-drafts-empty" style="display:none;">暂无草稿</div>
       </div>
     </div>
     <!-- 设置页：页面内大弹窗 -->

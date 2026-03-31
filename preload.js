@@ -2,11 +2,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 let applyEditorContentCallback = null;
 let workspaceChangedCallback = null;
+let composeUploadProgressCallback = null;
 ipcRenderer.on('apply-editor-content', (_, content) => {
   if (typeof applyEditorContentCallback === 'function') applyEditorContentCallback(content);
 });
 ipcRenderer.on('workspace:changed', () => {
   if (typeof workspaceChangedCallback === 'function') workspaceChangedCallback();
+});
+ipcRenderer.on('compose:uploadProgress', (_, payload) => {
+  if (typeof composeUploadProgressCallback === 'function') composeUploadProgressCallback(payload);
 });
 
 contextBridge.exposeInMainWorld('markwrite', {
@@ -18,6 +22,9 @@ contextBridge.exposeInMainWorld('markwrite', {
     },
     onWorkspaceChanged: (callback) => {
       workspaceChangedCallback = typeof callback === 'function' ? callback : null;
+    },
+    onComposeUploadProgress: (callback) => {
+      composeUploadProgressCallback = typeof callback === 'function' ? callback : null;
     },
     openFile: () => ipcRenderer.invoke('file:open'),
     fileRead: (filePath) => ipcRenderer.invoke('file:read', filePath),
@@ -54,6 +61,12 @@ contextBridge.exposeInMainWorld('markwrite', {
     /** 与 eventstoreUI create_user（code 100）一致，向当前 Sync 的 esserver 注册用户 */
     identityRegisterOnServer: (payload) => ipcRenderer.invoke('identity:registerOnServer', payload),
     clipboardWriteText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+    composeDraftsList: () => ipcRenderer.invoke('composeDrafts:list'),
+    composeDraftsSave: (payload) => ipcRenderer.invoke('composeDrafts:save', payload),
+    composeDraftsLoad: (id) => ipcRenderer.invoke('composeDrafts:load', id),
+    composeDraftsDelete: (id) => ipcRenderer.invoke('composeDrafts:delete', id),
+    composeUploadAssetsAndFixPaths: (payload) => ipcRenderer.invoke('compose:uploadAssetsAndFixPaths', payload),
+    composeCreateContent: (payload) => ipcRenderer.invoke('compose:createContent', payload),
   },
 });
 

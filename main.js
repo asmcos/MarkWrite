@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, nativeImage, clipboard } = re
 const path = require('path');
 const http = require('http');
 const fs = require('fs');
+const { randomUUID, createHash } = require('crypto');
 const os = require('os');
 const chokidar = require('chokidar');
 
@@ -39,6 +40,7 @@ const {
   saveProfile: saveEventstoreProfile,
   registerUserOnServer,
   invalidateEsclientModule,
+  loadEsclient,
 } = require('./lib/eventstore-profile.js');
 const { writeEventstoreConfigFromSync } = require('./lib/write-eventstore-config.js');
 
@@ -863,6 +865,522 @@ ipcMain.handle('identity:saveProfile', async (_event, profile) => {
   }
 });
 
+/**
+ * 发布前：将封面/正文里引用的本地 uploads/* 图片上传到服务器，并返回替换后的 cover/content。
+ * - 仅处理形如 uploads/xxx 或 /uploads/xxx 的资源
+ * - 返回的 URL 以当前 Sync 的 uploadpath 为前缀
+ */
+ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
+  try {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const requestId = typeof p.requestId === 'string' ? p.requestId : '';
+    const emitProgress = (data) => {
+      try {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        mainWindow.webContents.send('compose:uploadProgress', { requestId, ...(data || {}) });
+      } catch (_) {}
+    };
+
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeServer = servers.find((s) => s.id === syncCfg.activeId) || servers[0];
+    const uploadBase = (activeServer && typeof activeServer.uploadpath === 'string' ? activeServer.uploadpath.trim() : '')
+      || '';
+    const esserver = (activeServer && typeof activeServer.esserver === 'string' ? activeServer.esserver.trim() : '')
+      || '';
+    if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+    if (!uploadBase) return { ok: false, message: '请先在 Sync & Servers 中配置 uploadpath（用于生成图片访问地址）' };
+
+    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
+    if (fs.existsSync(IDENTITY_FILE)) {
+      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+      identity = JSON.parse(raw);
+    }
+    const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    const privkeyEsec = (identity.privkey && String(identity.privkey).trim()) || '';
+    if (!pubkeyHex || !privkeyEsec) return { ok: false, message: '请先保存用户密钥（含 ESEC）' };
+
+    if (!eventstoreKeyLib) {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      eventstoreKeyLib = require('eventstore-tools/src/key');
+    }
+    const { esecDecode } = eventstoreKeyLib;
+    let privkeyBytes;
+    try {
+      const decoded = esecDecode(privkeyEsec);
+      privkeyBytes = (decoded && (decoded.data || decoded)) || decoded;
+    } catch (_) {
+      privkeyBytes = null;
+    }
+    if (!privkeyBytes) return { ok: false, message: 'ESEC 密钥解析失败' };
+    const cover = typeof p.cover === 'string' ? p.cover : '';
+    const content = typeof p.content === 'string' ? p.content : '';
+    const prevAssetMapRaw = p && typeof p.assetMap === 'object' && p.assetMap ? p.assetMap : {};
+    const prevAssetMap = {};
+    Object.keys(prevAssetMapRaw).forEach((k) => {
+      const v = prevAssetMapRaw[k];
+      if (!k || typeof k !== 'string') return;
+      if (!v || typeof v !== 'object') return;
+      const sha256 = typeof v.sha256 === 'string' ? v.sha256.trim() : '';
+      const fileUrl = typeof v.fileUrl === 'string' ? v.fileUrl.trim() : '';
+      if (!sha256 || !fileUrl) return;
+      prevAssetMap[k] = { sha256, fileUrl };
+    });
+
+    const toUpload = new Set();
+    const addUploadRef = (u) => {
+      const s = typeof u === 'string' ? u.trim() : '';
+      if (!s) return;
+      const m = s.match(/^(?:\/)?uploads\/([^\s?#)]+)$/i);
+      if (!m) return;
+      const rel = `uploads/${m[1]}`;
+      toUpload.add(rel);
+    };
+
+    // cover
+    addUploadRef(cover);
+    // markdown image: ![](...)
+    const mdImgRe = /!\[[^\]]*]\(([^)]+)\)/g;
+    let m;
+    while ((m = mdImgRe.exec(content)) !== null) {
+      const rawUrl = (m[1] || '').trim().replace(/^<|>$/g, '');
+      const url = rawUrl.split(/\s+/)[0]; // strip optional title
+      addUploadRef(url.replace(/^["']|["']$/g, ''));
+    }
+    // html image: <img src="...">
+    const htmlImgRe = /<img[^>]+src=["']([^"']+)["']/gi;
+    while ((m = htmlImgRe.exec(content)) !== null) {
+      addUploadRef(m[1]);
+    }
+
+    const uploadsDir = path.join(ROOT, 'uploads');
+    const uploadedMap = {};
+    const nextAssetMap = { ...prevAssetMap };
+    const targets = Array.from(toUpload).filter((rel) => fs.existsSync(path.join(uploadsDir, path.basename(rel))));
+    const totalFiles = targets.length;
+    let completedFiles = 0;
+
+    emitProgress({
+      phase: 'start',
+      totalFiles,
+      completedFiles,
+      overallPercent: totalFiles ? 0 : 100,
+      message: totalFiles ? `准备上传 ${totalFiles} 张图片` : '没有需要上传的本地图片',
+    });
+
+    if (!totalFiles) {
+      return {
+        ok: true,
+        uploaded: uploadedMap,
+        cover,
+        content,
+      };
+    }
+
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    /** 将服务端返回的 fileUrl/path/url 归一为可访问地址（优先使用服务端返回值） */
+    const mkPublicUrl = (serverPathOrUrl) => {
+      const base = uploadBase.endsWith('/') ? uploadBase : `${uploadBase}/`;
+      let p = String(serverPathOrUrl || '').trim();
+      if (!p) return '';
+      if (/^https?:\/\//i.test(p)) return p.replace(/\/uploads\/uploads\//gi, '/uploads/');
+      p = p.replace(/^\//, '');
+      try {
+        const baseUrl = new URL(base);
+        const basePath = (baseUrl.pathname || '').replace(/\/+$/, '');
+        if (/\/uploads$/i.test(basePath)) {
+          if (/^uploads\//i.test(p)) p = p.replace(/^uploads\//i, '');
+          return String(new URL(p, base).href).replace(/\/uploads\/uploads\//gi, '/uploads/');
+        }
+        if (!/^uploads\//i.test(p)) p = `uploads/${p}`;
+        return String(new URL(p, base).href).replace(/\/uploads\/uploads\//gi, '/uploads/');
+      } catch (_) {
+        const b = uploadBase.replace(/\/+$/, '');
+        if (/\/uploads$/i.test(b)) {
+          if (/^uploads\//i.test(p)) p = p.replace(/^uploads\//i, '');
+          return `${b}/${p}`.replace(/\/uploads\/uploads\//gi, '/uploads/');
+        }
+        if (!/^uploads\//i.test(p)) p = `uploads/${p}`;
+        return `${b}/${p}`.replace(/\/uploads\/uploads\//gi, '/uploads/');
+      }
+    };
+    const safeName = (name) => String(name || '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/-+/g, '-');
+
+    for (let fileIndex = 0; fileIndex < targets.length; fileIndex += 1) {
+      const rel = targets[fileIndex];
+      const baseName = path.basename(rel);
+      const ext = path.extname(baseName) || '.png';
+      const fileStem = safeName(path.basename(baseName, ext)) || 'image';
+      const remoteName = `${fileStem}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+      const localPath = path.join(uploadsDir, baseName);
+      const buf = fs.readFileSync(localPath);
+      const sha256 = createHash('sha256').update(buf).digest('hex');
+
+      const prev = prevAssetMap[rel];
+      if (prev && prev.sha256 === sha256 && typeof prev.fileUrl === 'string' && prev.fileUrl.trim()) {
+        const url = mkPublicUrl(prev.fileUrl);
+        uploadedMap[rel] = url;
+        nextAssetMap[rel] = { sha256, fileUrl: prev.fileUrl };
+        completedFiles += 1;
+        emitProgress({
+          phase: 'file_done',
+          fileIndex: fileIndex + 1,
+          totalFiles,
+          completedFiles,
+          currentFile: rel,
+          currentFilePercent: 100,
+          overallPercent: Math.floor((completedFiles / totalFiles) * 100),
+          message: `已复用 ${completedFiles}/${totalFiles}: ${baseName}`,
+        });
+        continue;
+      }
+      const fileData = Array.from(new Uint8Array(buf));
+      let serverReturnedPath = '';
+      emitProgress({
+        phase: 'file_start',
+        fileIndex: fileIndex + 1,
+        totalFiles,
+        completedFiles,
+        currentFile: rel,
+        currentFilePercent: 0,
+        overallPercent: Math.floor((completedFiles / totalFiles) * 100),
+        message: `上传中 ${fileIndex + 1}/${totalFiles}: ${baseName}`,
+      });
+      await new Promise((resolve, reject) => {
+        let settled = false;
+        let timer = null;
+        const done = (ok, err) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          if (ok) resolve();
+          else reject(new Error(err || 'upload failed'));
+        };
+        timer = setTimeout(() => done(false, '上传超时（20s）'), 20000);
+        try {
+          mod.upload_file(remoteName, fileData, pubkeyHex, privkeyBytes, (msg) => {
+            try {
+              const maybe = msg && Array.isArray(msg) ? msg[2] : msg;
+              const pickServerFilePath = (obj) => {
+                if (!obj || typeof obj !== 'object') return '';
+                const cands = [
+                  obj.fileUrl,
+                  obj.fileName,
+                  obj.filename,
+                  obj.file,
+                  obj.webPath,
+                  obj.path,
+                  obj.url,
+                  obj?.data?.fileName,
+                  obj?.data?.filename,
+                  obj?.data?.file,
+                  obj?.data?.webPath,
+                  obj?.data?.path,
+                  obj?.data?.url,
+                  obj?.data?.fileUrl,
+                ];
+                for (const c of cands) {
+                  if (typeof c !== 'string') continue;
+                  const v = c.trim();
+                  if (!v) continue;
+                  return v;
+                }
+                return '';
+              };
+              if (maybe && typeof maybe === 'object' && typeof maybe.message === 'string') {
+                const mm = maybe.message.match(/^(\d+)\/(\d+)$/);
+                if (mm) {
+                  const chunkDone = Number(mm[1]) + 1;
+                  const chunkTotal = Number(mm[2]);
+                  const currentFilePercent = chunkTotal > 0
+                    ? Math.max(1, Math.min(99, Math.floor((chunkDone / chunkTotal) * 100)))
+                    : 0;
+                  const overallPercent = Math.max(
+                    1,
+                    Math.min(
+                      99,
+                      Math.floor((((completedFiles + (currentFilePercent / 100)) / totalFiles) * 100)),
+                    ),
+                  );
+                  emitProgress({
+                    phase: 'file_progress',
+                    fileIndex: fileIndex + 1,
+                    totalFiles,
+                    completedFiles,
+                    currentFile: rel,
+                    currentFilePercent,
+                    overallPercent,
+                    message: `上传中 ${fileIndex + 1}/${totalFiles}: ${baseName} ${currentFilePercent}%`,
+                  });
+                }
+              }
+              if (maybe && typeof maybe === 'object') {
+                const picked = pickServerFilePath(maybe);
+                if (picked) serverReturnedPath = picked;
+              }
+              if (maybe && typeof maybe === 'object' && maybe.code != null && Number(maybe.code) >= 400) {
+                done(false, maybe.message || `服务器错误 (${maybe.code})`);
+                return;
+              }
+              if (maybe && typeof maybe === 'object' && maybe.code != null && Number(maybe.code) < 400) {
+                // code 202 常用于分片进度，最终响应通常是其它 2xx
+                if (Number(maybe.code) !== 202) {
+                  done(true);
+                }
+              }
+            } catch (_) {}
+          });
+        } catch (e) {
+          done(false, e && e.message ? e.message : String(e));
+        }
+      });
+      uploadedMap[rel] = mkPublicUrl(serverReturnedPath || remoteName);
+      // 记录服务端返回的 fileUrl/path（不强制是文件名；优先用服务端返回值）
+      nextAssetMap[rel] = { sha256, fileUrl: serverReturnedPath || remoteName };
+      completedFiles += 1;
+      emitProgress({
+        phase: 'file_done',
+        fileIndex: fileIndex + 1,
+        totalFiles,
+        completedFiles,
+        currentFile: rel,
+        currentFilePercent: 100,
+        overallPercent: Math.floor((completedFiles / totalFiles) * 100),
+        message: `已完成 ${completedFiles}/${totalFiles}: ${baseName}`,
+      });
+    }
+
+    const rewrite = (text) => {
+      let out = String(text || '');
+      Object.keys(uploadedMap).forEach((rel) => {
+        const remote = uploadedMap[rel];
+        const escaped = rel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        out = out.replace(new RegExp(`(?<![\\w/])${escaped}`, 'g'), remote);
+        out = out.replace(new RegExp(`(?<![\\w/])\\/${escaped}`, 'g'), remote);
+      });
+      return out;
+    };
+
+    const dedupeUploadsInText = (s) => String(s || '').replace(/\/uploads\/uploads\//gi, '/uploads/');
+
+    emitProgress({
+      phase: 'done',
+      totalFiles,
+      completedFiles,
+      overallPercent: 100,
+      message: `上传完成 ${completedFiles}/${totalFiles}`,
+    });
+
+    return {
+      ok: true,
+      uploaded: uploadedMap,
+      assetMap: nextAssetMap,
+      cover: dedupeUploadsInText(rewrite(cover)),
+      content: dedupeUploadsInText(rewrite(content)),
+    };
+  } catch (e) {
+    try {
+      const requestId = payload && typeof payload === 'object' && typeof payload.requestId === 'string'
+        ? payload.requestId
+        : '';
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('compose:uploadProgress', {
+          requestId,
+          phase: 'error',
+          message: e && e.message ? e.message : String(e),
+        });
+      }
+    } catch (_) {}
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+ipcMain.handle('compose:createContent', async (_event, payload) => {
+  try {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const mode = p.mode === 'book' ? 'book' : 'blog';
+    const title = String(p.title || '').trim();
+    if (!title) return { ok: false, message: '标题不能为空' };
+
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeServer = servers.find((s) => s.id === syncCfg.activeId) || servers[0];
+    const esserver = (activeServer && typeof activeServer.esserver === 'string' ? activeServer.esserver.trim() : '')
+      || '';
+    if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+
+    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
+    if (fs.existsSync(IDENTITY_FILE)) {
+      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+      identity = JSON.parse(raw);
+    }
+    const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    const privkeyEsec = (identity.privkey && String(identity.privkey).trim()) || '';
+    if (!pubkeyHex || !privkeyEsec) return { ok: false, message: '请先保存用户密钥（含 ESEC）' };
+
+    if (!eventstoreKeyLib) {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      eventstoreKeyLib = require('eventstore-tools/src/key');
+    }
+    const { esecDecode } = eventstoreKeyLib;
+    let privkeyBytes;
+    try {
+      const decoded = esecDecode(privkeyEsec);
+      privkeyBytes = (decoded && (decoded.data || decoded)) || decoded;
+    } catch (_) {
+      privkeyBytes = null;
+    }
+    if (!privkeyBytes) return { ok: false, message: 'ESEC 密钥解析失败' };
+
+    const parseTags = (v) => {
+      if (Array.isArray(v)) return v.map((x) => String(x || '').trim()).filter(Boolean);
+      if (typeof v === 'string') return v.split(/[，,、]/).map((x) => x.trim()).filter(Boolean);
+      return [];
+    };
+
+    const normalized = {
+      title,
+      tags: parseTags(p.tags),
+      cover: String(p.cover || '').trim(),
+      extra: String(p.extra || '').trim(),
+      content: typeof p.content === 'string' ? p.content : '',
+    };
+    const remoteId = typeof p.remoteId === 'string' ? p.remoteId.trim() : '';
+
+    /** 与线上一致：封面只存文件名，不带域名 */
+    function coverToFileNameOnly(cover) {
+      const s = String(cover || '').trim();
+      if (!s) return '';
+      if (/^https?:\/\//i.test(s)) {
+        try {
+          const u = new URL(s);
+          const segs = u.pathname.split('/').filter(Boolean);
+          return segs.pop() || '';
+        } catch (_) {
+          return '';
+        }
+      }
+      return s.replace(/^\//, '').replace(/^uploads\//i, '').split('/').pop() || '';
+    }
+    const coverFile = coverToFileNameOnly(normalized.cover);
+
+    const blogData = {
+      title: normalized.title,
+      content: normalized.content,
+      cover: coverFile,
+      coverUrl: coverFile,
+      extra: normalized.extra,
+      summary: normalized.extra,
+      labels: normalized.tags,
+      tags: normalized.tags,
+    };
+    if (remoteId) blogData.blogId = remoteId;
+    const bookData = {
+      title: normalized.title,
+      content: normalized.content,
+      cover: coverFile,
+      coverUrl: coverFile,
+      extra: normalized.extra,
+      summary: normalized.extra,
+      labels: normalized.tags,
+      tags: normalized.tags,
+    };
+    if (remoteId) bookData.bookId = remoteId;
+
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+
+    if (mode === 'blog') {
+      return await new Promise((resolve) => {
+        let settled = false;
+        let timer = null;
+        const done = (ok, message, id) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          resolve({ ok, message, id });
+        };
+        timer = setTimeout(() => done(false, '发布超时（15s）'), 15000);
+        try {
+          mod.create_blog(JSON.stringify(blogData), pubkeyHex, privkeyBytes, (msg) => {
+            try {
+              const m = msg && Array.isArray(msg) ? msg[2] : msg;
+              if (!m || m === 'EOSE') return;
+              if (typeof m === 'object' && m.code != null) {
+                const c = Number(m.code);
+                if (c >= 400) {
+                  done(false, m.message || `服务器错误 (${c})`);
+                  return;
+                }
+                if (c === 201) {
+                  done(true, '发布成功', m.id || '');
+                  return;
+                }
+                if (c >= 200 && c < 300) {
+                  done(true, m.message || '发布成功', m.id || '');
+                }
+              }
+            } catch (_) {}
+          });
+        } catch (e) {
+          done(false, e && e.message ? e.message : String(e));
+        }
+      });
+    }
+
+    return await new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      const done = (ok, message, id) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve({ ok, message, id });
+      };
+      timer = setTimeout(() => done(false, '发布超时（15s）'), 15000);
+      try {
+        mod.create_book(bookData, pubkeyHex, privkeyBytes, (msg) => {
+          try {
+            const m = msg && Array.isArray(msg) ? msg[2] : msg;
+            if (!m || m === 'EOSE') return;
+            if (typeof m === 'object' && m.code != null) {
+              const c = Number(m.code);
+              if (c >= 400) {
+                done(false, m.message || `服务器错误 (${c})`);
+                return;
+              }
+              if (c === 201) {
+                done(true, '发布成功', m.id || '');
+                return;
+              }
+              if (c >= 200 && c < 300) {
+                done(true, m.message || '发布成功', m.id || '');
+              }
+            }
+          } catch (_) {}
+        });
+      } catch (e) {
+        done(false, e && e.message ? e.message : String(e));
+      }
+    });
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
 // 切换 DevTools：供前端自定义菜单调用
 ipcMain.handle('app:toggleDevTools', () => {
   const win = BrowserWindow.getFocusedWindow() || mainWindow;
@@ -998,6 +1516,133 @@ app.whenReady().then(() => {
     ensureAiBackend(userDataPath);
     return true;
   });
+
+  const composeDraftsDir = path.join(userDataPath, 'compose-drafts');
+  function ensureComposeDraftsDir() {
+    fs.mkdirSync(composeDraftsDir, { recursive: true });
+    return composeDraftsDir;
+  }
+  function isSafeDraftId(id) {
+    return typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id);
+  }
+  function normalizeComposeTagsInput(tags) {
+    if (Array.isArray(tags)) {
+      return tags.map((t) => String(t || '').trim()).filter(Boolean);
+    }
+    if (typeof tags === 'string') {
+      return tags
+        .split(/[，,、]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    return [];
+  }
+  ipcMain.handle('composeDrafts:list', async () => {
+    try {
+      const dir = ensureComposeDraftsDir();
+      const names = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+      const drafts = [];
+      for (const name of names) {
+        const id = name.replace(/\.json$/i, '');
+        if (!isSafeDraftId(id)) continue;
+        const fp = path.join(dir, name);
+        try {
+          const raw = fs.readFileSync(fp, 'utf8');
+          const j = JSON.parse(raw);
+          const updatedAt = typeof j.updatedAt === 'number' ? j.updatedAt : 0;
+          const remoteId = typeof j.remoteId === 'string' ? j.remoteId : '';
+          const assetMap = (j && typeof j.assetMap === 'object' && j.assetMap) ? j.assetMap : {};
+          const assetCount = Object.keys(assetMap).length;
+          drafts.push({
+            id,
+            mode: j.mode === 'book' ? 'book' : 'blog',
+            title: typeof j.title === 'string' ? j.title : '',
+            updatedAt,
+            remoteId,
+            assetCount,
+          });
+        } catch (_) {}
+      }
+      drafts.sort((a, b) => b.updatedAt - a.updatedAt);
+      return { ok: true, drafts };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e), drafts: [] };
+    }
+  });
+  ipcMain.handle('composeDrafts:save', async (_event, payload) => {
+    try {
+      const dir = ensureComposeDraftsDir();
+      const p = payload && typeof payload === 'object' ? payload : {};
+      let id = typeof p.id === 'string' && isSafeDraftId(p.id) ? p.id : randomUUID();
+      const now = Date.now();
+      const tags = normalizeComposeTagsInput(p.tags);
+      const assetMapRaw = p && typeof p.assetMap === 'object' && p.assetMap ? p.assetMap : {};
+      const assetMap = {};
+      Object.keys(assetMapRaw).forEach((k) => {
+        const v = assetMapRaw[k];
+        if (!k || typeof k !== 'string') return;
+        if (!v || typeof v !== 'object') return;
+        const sha256 = typeof v.sha256 === 'string' ? v.sha256.trim() : '';
+        const fileUrl = typeof v.fileUrl === 'string' ? v.fileUrl.trim() : '';
+        if (!sha256 || !fileUrl) return;
+        assetMap[k] = { sha256, fileUrl };
+      });
+      const draft = {
+        id,
+        mode: p.mode === 'book' ? 'book' : 'blog',
+        title: String(p.title != null ? p.title : '').slice(0, 500),
+        tags,
+        cover: String(p.cover != null ? p.cover : ''),
+        extra: String(p.extra != null ? p.extra : ''),
+        content: typeof p.content === 'string' ? p.content : '',
+        remoteId: typeof p.remoteId === 'string' ? p.remoteId.trim() : '',
+        assetMap,
+        updatedAt: now,
+      };
+      const fp = path.join(dir, `${id}.json`);
+      fs.writeFileSync(fp, JSON.stringify(draft, null, 2), 'utf8');
+      return { ok: true, id };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    }
+  });
+  ipcMain.handle('composeDrafts:load', async (_event, id) => {
+    try {
+      if (!isSafeDraftId(id)) return { ok: false, error: '无效的草稿 id' };
+      const dir = ensureComposeDraftsDir();
+      const fp = path.join(dir, `${id}.json`);
+      if (!fs.existsSync(fp)) return { ok: false, error: '草稿不存在' };
+      const raw = fs.readFileSync(fp, 'utf8');
+      const j = JSON.parse(raw);
+      const draft = {
+        id,
+        mode: j.mode === 'book' ? 'book' : 'blog',
+        title: typeof j.title === 'string' ? j.title : '',
+        tags: normalizeComposeTagsInput(j.tags),
+        cover: typeof j.cover === 'string' ? j.cover : '',
+        extra: typeof j.extra === 'string' ? j.extra : '',
+        content: typeof j.content === 'string' ? j.content : '',
+        remoteId: typeof j.remoteId === 'string' ? j.remoteId : '',
+        assetMap: (j && typeof j.assetMap === 'object' && j.assetMap) ? j.assetMap : {},
+        updatedAt: typeof j.updatedAt === 'number' ? j.updatedAt : 0,
+      };
+      return { ok: true, draft };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    }
+  });
+  ipcMain.handle('composeDrafts:delete', async (_event, id) => {
+    try {
+      if (!isSafeDraftId(id)) return { ok: false, error: '无效的草稿 id' };
+      const dir = ensureComposeDraftsDir();
+      const fp = path.join(dir, `${id}.json`);
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e && e.message ? e.message : e) };
+    }
+  });
+
   function tryListen(port) {
     if (port > PORT_LAST) {
       console.error(`Ports ${PORT_BASE}-${PORT_LAST} in use. Close the other app or change PORT_BASE in main.js`);
