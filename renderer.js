@@ -45,6 +45,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     assetMap: {},
   };
   let activeComposeUploadRequestId = null;
+  let composeGenerateStatusTimer = null;
 
   function refreshIdentityKeyHexCacheFromIdentity(id) {
     if (!id || typeof id !== 'object') return;
@@ -211,6 +212,28 @@ window.addEventListener('DOMContentLoaded', async () => {
     contentComposeUploadProgress.classList.toggle('is-error', kind === 'error');
   }
 
+  function setComposeGenerateStatus(text, kind) {
+    if (!contentComposeGenerateStatus) return;
+    const msg = String(text || '').trim();
+    if (composeGenerateStatusTimer) {
+      clearTimeout(composeGenerateStatusTimer);
+      composeGenerateStatusTimer = null;
+    }
+    if (!msg) {
+      contentComposeGenerateStatus.textContent = '';
+      contentComposeGenerateStatus.style.display = 'none';
+      contentComposeGenerateStatus.classList.remove('is-loading', 'is-success');
+      return;
+    }
+    contentComposeGenerateStatus.style.display = 'inline-flex';
+    contentComposeGenerateStatus.textContent = msg;
+    contentComposeGenerateStatus.classList.toggle('is-loading', kind === 'loading');
+    contentComposeGenerateStatus.classList.toggle('is-success', kind === 'success');
+    if (kind === 'success') {
+      composeGenerateStatusTimer = setTimeout(() => setComposeGenerateStatus(''), 1800);
+    }
+  }
+
   function readComposeDraftFromUi() {
     const titleEl = document.getElementById('content-compose-main-title');
     const coverEl = document.getElementById('content-compose-cover');
@@ -250,10 +273,25 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  function normalizeLocalUploadsWebPath(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    if (/^\/?uploads\//i.test(raw)) return raw.replace(/^\//, '');
+    return raw;
+  }
+
+  function resolveComposeCoverPreviewSrc(v) {
+    const raw = String(v || '').trim();
+    if (!raw) return '';
+    if (/^https?:\/\//i.test(raw) || /^data:/i.test(raw) || /^blob:/i.test(raw)) return raw;
+    if (/^\/?uploads\//i.test(raw)) return `/${raw.replace(/^\//, '')}`;
+    return toPublicUploadUrl(raw);
+  }
+
   function renderComposeCoverPreview(url) {
     if (!contentComposeCoverPreview) return;
     contentComposeCoverPreview.innerHTML = '';
-    const src = (url || '').trim();
+    const src = resolveComposeCoverPreviewSrc(url);
     if (!src) {
       const icon = document.createElement('i');
       icon.className = 'bi bi-image';
@@ -351,9 +389,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   const menuSettingsOpen = document.getElementById('menu-settings-open');
   const menuContentNewBlog = document.getElementById('menu-content-new-blog');
   const menuContentNewBook = document.getElementById('menu-content-new-book');
-  const menuContentMyBlog = document.getElementById('menu-content-my-blog');
-  const menuContentMyBook = document.getElementById('menu-content-my-book');
-  const menuContentDrafts = document.getElementById('menu-content-drafts');
+  const menuContentDraftsBlog = document.getElementById('menu-content-drafts-blog');
+  const menuContentDraftsBook = document.getElementById('menu-content-drafts-book');
+  const menuContentRemoteBlog = document.getElementById('menu-content-remote-blog');
+  const menuContentRemoteBook = document.getElementById('menu-content-remote-book');
   const contentComposePanel = document.getElementById('content-compose-panel');
   const contentComposeTitle = document.getElementById('content-compose-title');
   const contentComposeSubtitle = document.getElementById('content-compose-subtitle');
@@ -365,6 +404,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const contentComposeExtra = document.getElementById('content-compose-extra');
   const contentComposeGenerateTags = document.getElementById('content-compose-generate-tags');
   const contentComposeGenerateSummary = document.getElementById('content-compose-generate-summary');
+  const contentComposeGenerateStatus = document.getElementById('content-compose-generate-status');
   const contentComposeCoverUpload = document.getElementById('content-compose-cover-upload');
   const contentComposeCoverScreenshot = document.getElementById('content-compose-cover-screenshot');
   const contentComposeCoverFile = document.getElementById('content-compose-cover-file');
@@ -1724,7 +1764,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     renderComposeTags();
     if (contentComposeMainTitle) contentComposeMainTitle.value = d.title || '';
     if (contentComposeCover) contentComposeCover.value = d.cover || '';
-    renderComposeCoverPreview(toPublicUploadUrl(d.cover || ''));
+    renderComposeCoverPreview(d.cover || '');
     if (contentComposeExtra) contentComposeExtra.value = d.extra || '';
     if (editor) editor.setValue(typeof d.content === 'string' ? d.content : '');
   }
@@ -1750,6 +1790,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (contentComposeExtra) contentComposeExtra.value = '';
     renderComposeCoverPreview('');
     setComposeUploadProgress('');
+    setComposeGenerateStatus('');
     editor.setValue('');
     if (paneEditor) paneEditor.dataset.composeOpen = '1';
     editor.focus();
@@ -1767,6 +1808,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     composeState.assetMap = {};
     activeComposeUploadRequestId = null;
     setComposeUploadProgress('');
+    setComposeGenerateStatus('');
     if (prev) {
       setFilename(prev.filename || null);
       editor.setValue(prev.value || '');
@@ -1804,9 +1846,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   const composeDraftsOverlay = document.getElementById('compose-drafts-overlay');
+  const composeDraftsTitleEl = document.querySelector('.compose-drafts-title');
   const composeDraftsListEl = document.getElementById('compose-drafts-list');
   const composeDraftsEmptyEl = document.getElementById('compose-drafts-empty');
   const composeDraftsCloseBtn = document.getElementById('compose-drafts-close');
+  const composeDraftsFilterAllBtn = document.getElementById('compose-drafts-filter-all');
+  const composeDraftsFilterBlogBtn = document.getElementById('compose-drafts-filter-blog');
+  const composeDraftsFilterBookBtn = document.getElementById('compose-drafts-filter-book');
+  let composeDraftsFilterMode = 'all';
 
   function closeComposeDraftsModal() {
     if (composeDraftsOverlay) composeDraftsOverlay.style.display = 'none';
@@ -1827,7 +1874,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     const api = window.markwrite && window.markwrite.api;
     if (!api || typeof api.composeDraftsList !== 'function' || !composeDraftsListEl) return;
     const res = await api.composeDraftsList();
-    const drafts = (res && res.ok && Array.isArray(res.drafts)) ? res.drafts : [];
+    const draftsRaw = (res && res.ok && Array.isArray(res.drafts)) ? res.drafts : [];
+    const drafts = composeDraftsFilterMode === 'all'
+      ? draftsRaw
+      : draftsRaw.filter((d) => (d && d.mode) === composeDraftsFilterMode);
     composeDraftsListEl.innerHTML = '';
     if (composeDraftsEmptyEl) {
       composeDraftsEmptyEl.style.display = drafts.length ? 'none' : 'block';
@@ -1866,6 +1916,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       body.appendChild(title);
       body.appendChild(meta);
 
+      const coverThumb = document.createElement('div');
+      coverThumb.className = 'compose-drafts-item-cover';
+      const coverSrc = toPublicUploadUrl((row && row.cover) || '');
+      if (coverSrc) {
+        const img = document.createElement('img');
+        img.src = coverSrc;
+        img.alt = '';
+        img.loading = 'lazy';
+        img.onerror = () => {
+          coverThumb.innerHTML = '<i class="bi bi-image"></i>';
+        };
+        coverThumb.appendChild(img);
+      } else {
+        coverThumb.innerHTML = '<i class="bi bi-image"></i>';
+      }
+
       const delBtn = document.createElement('button');
       delBtn.type = 'button';
       delBtn.className = 'compose-drafts-item-del';
@@ -1903,6 +1969,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
       li.appendChild(badge);
       li.appendChild(body);
+      li.appendChild(coverThumb);
       li.appendChild(delBtn);
       composeDraftsListEl.appendChild(li);
     });
@@ -1913,6 +1980,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     composeDraftsOverlay.style.display = 'flex';
     await refreshComposeDraftsList();
   }
+
+  function setComposeDraftFilter(mode) {
+    composeDraftsFilterMode = (mode === 'blog' || mode === 'book') ? mode : 'all';
+    if (composeDraftsTitleEl) {
+      composeDraftsTitleEl.textContent = composeDraftsFilterMode === 'blog'
+        ? '博客草稿箱'
+        : (composeDraftsFilterMode === 'book' ? '书籍草稿箱' : '草稿箱');
+    }
+    if (composeDraftsFilterAllBtn) composeDraftsFilterAllBtn.classList.toggle('is-active', composeDraftsFilterMode === 'all');
+    if (composeDraftsFilterBlogBtn) composeDraftsFilterBlogBtn.classList.toggle('is-active', composeDraftsFilterMode === 'blog');
+    if (composeDraftsFilterBookBtn) composeDraftsFilterBookBtn.classList.toggle('is-active', composeDraftsFilterMode === 'book');
+    void refreshComposeDraftsList();
+  }
+  setComposeDraftFilter('all');
 
   if (window.markwrite?.api?.onComposeUploadProgress) {
     window.markwrite.api.onComposeUploadProgress((evt) => {
@@ -1938,15 +2019,29 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (menuContentNewBlog) menuContentNewBlog.addEventListener('click', () => enterContentCompose('blog'));
   if (menuContentNewBook) menuContentNewBook.addEventListener('click', () => enterContentCompose('book'));
-  if (menuContentDrafts) menuContentDrafts.addEventListener('click', () => openComposeDraftsModal());
+  if (menuContentDraftsBlog) menuContentDraftsBlog.addEventListener('click', () => {
+    setComposeDraftFilter('blog');
+    openComposeDraftsModal();
+  });
+  if (menuContentDraftsBook) menuContentDraftsBook.addEventListener('click', () => {
+    setComposeDraftFilter('book');
+    openComposeDraftsModal();
+  });
+  if (menuContentRemoteBlog) menuContentRemoteBlog.addEventListener('click', () => {
+    showAppAlert('远程博客列表下一步接入。');
+  });
+  if (menuContentRemoteBook) menuContentRemoteBook.addEventListener('click', () => {
+    showAppAlert('远程书籍列表下一步接入。');
+  });
+  if (composeDraftsFilterAllBtn) composeDraftsFilterAllBtn.addEventListener('click', () => setComposeDraftFilter('all'));
+  if (composeDraftsFilterBlogBtn) composeDraftsFilterBlogBtn.addEventListener('click', () => setComposeDraftFilter('blog'));
+  if (composeDraftsFilterBookBtn) composeDraftsFilterBookBtn.addEventListener('click', () => setComposeDraftFilter('book'));
   if (composeDraftsCloseBtn) composeDraftsCloseBtn.addEventListener('click', () => closeComposeDraftsModal());
   if (composeDraftsOverlay) {
     composeDraftsOverlay.addEventListener('click', (e) => {
       if (e.target === composeDraftsOverlay) closeComposeDraftsModal();
     });
   }
-  if (menuContentMyBlog) menuContentMyBlog.addEventListener('click', () => showAppAlert('我的 Blog 列表下一步接入。'));
-  if (menuContentMyBook) menuContentMyBook.addEventListener('click', () => showAppAlert('我的书籍列表下一步接入。'));
   if (contentComposeClose) contentComposeClose.addEventListener('click', exitContentCompose);
   if (contentComposeCoverUpload && contentComposeCoverFile) {
     contentComposeCoverUpload.addEventListener('click', () => contentComposeCoverFile.click());
@@ -1972,9 +2067,9 @@ window.addEventListener('DOMContentLoaded', async () => {
           showAppAlert((res && res.error) || '封面上传失败');
           return;
         }
-        const url = toPublicUploadUrl(res.webPath);
-        if (contentComposeCover) contentComposeCover.value = url;
-        renderComposeCoverPreview(url);
+        const localPath = normalizeLocalUploadsWebPath(res.webPath);
+        if (contentComposeCover) contentComposeCover.value = localPath;
+        renderComposeCoverPreview(localPath);
       } finally {
         contentComposeCoverFile.value = '';
       }
@@ -1988,55 +2083,85 @@ window.addEventListener('DOMContentLoaded', async () => {
         showAppAlert((res && res.error) || '剪贴板没有可用图片');
         return;
       }
-      const url = toPublicUploadUrl(res.webPath);
-      if (contentComposeCover) contentComposeCover.value = url;
-      renderComposeCoverPreview(url);
+      const localPath = normalizeLocalUploadsWebPath(res.webPath);
+      if (contentComposeCover) contentComposeCover.value = localPath;
+      renderComposeCoverPreview(localPath);
       showAppAlert('已设为封面。');
     });
   }
   if (contentComposeGenerateSummary) {
     contentComposeGenerateSummary.addEventListener('click', async () => {
       if (!window.markwrite?.api?.aiChat) return;
+      contentComposeGenerateSummary.disabled = true;
+      if (contentComposeGenerateTags) contentComposeGenerateTags.disabled = true;
       const title = (contentComposeMainTitle && contentComposeMainTitle.value.trim()) || '';
       const content = editor ? editor.getValue() : '';
       if (!title && !content.trim()) {
         showAppAlert('请先输入标题或正文，再生成简介。');
+        contentComposeGenerateSummary.disabled = false;
+        if (contentComposeGenerateTags) contentComposeGenerateTags.disabled = false;
         return;
       }
-      const prompt = `请根据以下内容生成 1 句中文简介（不超过40字，不加引号）。\n标题：${title}\n正文：\n${content.slice(0, 3000)}`;
-      const result = await window.markwrite.api.aiChat(prompt, { scene: 'compose-summary' });
-      const text = result && result.text ? String(result.text).trim() : '';
-      if (!text) {
-        showAppAlert((result && result.error) || '简介生成失败，请重试');
-        return;
+      try {
+        setComposeGenerateStatus('右侧生成中：简介…', 'loading');
+        const prompt = `请根据以下内容生成 1 句中文简介（不超过40字，不加引号）。\n标题：${title}\n正文：\n${content.slice(0, 3000)}`;
+        const result = await window.markwrite.api.aiChat(prompt, { scene: 'compose-summary' });
+        const text = result && result.text ? String(result.text).trim() : '';
+        if (!text) {
+          setComposeGenerateStatus('');
+          showAppAlert((result && result.error) || '简介生成失败，请重试');
+          return;
+        }
+        if (contentComposeExtra) contentComposeExtra.value = text.replace(/\n+/g, ' ').trim();
+        setComposeGenerateStatus('简介已更新', 'success');
+      } catch (e) {
+        setComposeGenerateStatus('');
+        showAppAlert(`简介生成失败：${e && e.message ? e.message : String(e)}`);
+      } finally {
+        contentComposeGenerateSummary.disabled = false;
+        if (contentComposeGenerateTags) contentComposeGenerateTags.disabled = false;
       }
-      if (contentComposeExtra) contentComposeExtra.value = text.replace(/\n+/g, ' ').trim();
     });
   }
   if (contentComposeGenerateTags) {
     contentComposeGenerateTags.addEventListener('click', async () => {
       if (!window.markwrite?.api?.aiChat) return;
+      contentComposeGenerateTags.disabled = true;
+      if (contentComposeGenerateSummary) contentComposeGenerateSummary.disabled = true;
       const title = (contentComposeMainTitle && contentComposeMainTitle.value.trim()) || '';
       const content = editor ? editor.getValue() : '';
       if (!title && !content.trim()) {
         showAppAlert('请先输入标题或正文，再生成标签。');
+        contentComposeGenerateTags.disabled = false;
+        if (contentComposeGenerateSummary) contentComposeGenerateSummary.disabled = false;
         return;
       }
-      const prompt = `请基于以下博客/书籍内容生成恰好 3 个中文标签，使用逗号分隔，只输出标签本身，不要编号或解释。\n标题：${title}\n正文：\n${content.slice(0, 3000)}`;
-      const result = await window.markwrite.api.aiChat(prompt, { scene: 'compose-tags' });
-      const raw = result && result.text ? String(result.text) : '';
-      if (!raw.trim()) {
-        showAppAlert((result && result.error) || '标签生成失败，请重试');
-        return;
+      try {
+        setComposeGenerateStatus('右侧生成中：标签…', 'loading');
+        const prompt = `请基于以下博客/书籍内容生成恰好 3 个中文标签，使用逗号分隔，只输出标签本身，不要编号或解释。\n标题：${title}\n正文：\n${content.slice(0, 3000)}`;
+        const result = await window.markwrite.api.aiChat(prompt, { scene: 'compose-tags' });
+        const raw = result && result.text ? String(result.text) : '';
+        if (!raw.trim()) {
+          setComposeGenerateStatus('');
+          showAppAlert((result && result.error) || '标签生成失败，请重试');
+          return;
+        }
+        const tags = raw
+          .replace(/\n/g, ',')
+          .split(/[，,、]/)
+          .map((s) => normalizeComposeTag(s))
+          .filter(Boolean)
+          .slice(0, 3);
+        composeState.tags = tags;
+        renderComposeTags();
+        setComposeGenerateStatus('标签已更新', 'success');
+      } catch (e) {
+        setComposeGenerateStatus('');
+        showAppAlert(`标签生成失败：${e && e.message ? e.message : String(e)}`);
+      } finally {
+        contentComposeGenerateTags.disabled = false;
+        if (contentComposeGenerateSummary) contentComposeGenerateSummary.disabled = false;
       }
-      const tags = raw
-        .replace(/\n/g, ',')
-        .split(/[，,、]/)
-        .map((s) => normalizeComposeTag(s))
-        .filter(Boolean)
-        .slice(0, 3);
-      composeState.tags = tags;
-      renderComposeTags();
     });
   }
   if (contentComposeTagAdd) {

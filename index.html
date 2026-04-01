@@ -52,20 +52,19 @@
           </div>
         </div>
         <div class="menu-root">
-          <button type="button" class="menu-root-btn">Settings</button>
-          <div class="menu-dropdown">
-            <button type="button" id="menu-settings-open">Open Settings…</button>
-          </div>
-        </div>
-        <div class="menu-root">
-          <button type="button" class="menu-root-btn">Content</button>
-          <div class="menu-dropdown">
-            <button type="button" id="menu-content-new-blog">新建 Blog</button>
-            <button type="button" id="menu-content-new-book">新建书籍</button>
-            <button type="button" id="menu-content-drafts">草稿箱</button>
+          <button type="button" class="menu-root-btn">创作</button>
+          <div class="menu-dropdown menu-dropdown-create">
+            <div class="menu-dropdown-section-title">博客</div>
+            <button type="button" id="menu-content-new-blog">新建博客</button>
+            <button type="button" id="menu-content-drafts-blog">博客草稿箱</button>
+            <button type="button" id="menu-content-remote-blog">远程博客</button>
             <hr />
-            <button type="button" id="menu-content-my-blog">我的 Blog</button>
-            <button type="button" id="menu-content-my-book">我的书籍</button>
+            <div class="menu-dropdown-section-title">书籍</div>
+            <button type="button" id="menu-content-new-book">新建书籍</button>
+            <button type="button" id="menu-content-drafts-book">书籍草稿箱</button>
+            <button type="button" id="menu-content-remote-book">远程书籍</button>
+            <hr />
+            <button type="button" id="menu-settings-open">设置</button>
           </div>
         </div>
       </div>
@@ -207,6 +206,7 @@
             <div class="content-compose-generate-actions">
               <button type="button" class="content-compose-mini-btn" id="content-compose-generate-tags">生成标签</button>
               <button type="button" class="content-compose-mini-btn" id="content-compose-generate-summary">生成简介</button>
+              <span class="content-compose-generate-status" id="content-compose-generate-status" style="display:none;"></span>
             </div>
             <div class="content-compose-actions">
               <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="content-compose-save-draft">保存草稿</button>
@@ -269,7 +269,12 @@
             <i class="bi bi-x-lg"></i>
           </button>
         </div>
-        <p class="compose-drafts-hint">本地保存在应用数据目录。点击一条草稿即可打开；也可按 Enter。</p>
+        <p class="compose-drafts-hint">草稿保存在当前工作区的 .markwrite 目录。点击一条草稿即可打开；也可按 Enter。</p>
+        <div class="compose-drafts-filters">
+          <button type="button" class="compose-drafts-filter is-active" id="compose-drafts-filter-all">全部</button>
+          <button type="button" class="compose-drafts-filter" id="compose-drafts-filter-blog">博客</button>
+          <button type="button" class="compose-drafts-filter" id="compose-drafts-filter-book">书籍</button>
+        </div>
         <ul class="compose-drafts-list" id="compose-drafts-list"></ul>
         <div class="compose-drafts-empty" id="compose-drafts-empty" style="display:none;">暂无草稿</div>
       </div>

@@ -183,6 +183,17 @@ body {
 .menu-dropdown button:hover {
   background: rgba(30, 64, 175, 0.9);
 }
+.menu-dropdown-create {
+  min-width: 186px;
+  padding: 6px 0;
+}
+.menu-dropdown-section-title {
+  padding: 3px 12px 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
 .menu-dropdown hr {
   margin: 4px 0;
   border: none;
@@ -513,7 +524,31 @@ body {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-start;
+  align-items: center;
   gap: 8px;
+}
+.content-compose-generate-status {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #94a3b8;
+}
+.content-compose-generate-status.is-loading::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.35);
+  border-top-color: rgba(56, 189, 248, 0.95);
+  animation: compose-generate-spin 0.8s linear infinite;
+}
+.content-compose-generate-status.is-success {
+  color: #86efac;
+}
+@keyframes compose-generate-spin {
+  to { transform: rotate(360deg); }
 }
 .apply-editor-btn {
   appearance: none;
@@ -595,6 +630,34 @@ body {
   font-size: 11px;
   color: #94a3b8;
   line-height: 1.45;
+}
+.compose-drafts-filters {
+  margin: 0 0 12px;
+  display: inline-flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 11px;
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  background: rgba(15, 23, 42, 0.65);
+  align-self: flex-start;
+}
+.compose-drafts-filter {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.compose-drafts-filter:hover {
+  color: #e2e8f0;
+  background: rgba(51, 65, 85, 0.45);
+}
+.compose-drafts-filter.is-active {
+  color: #dbeafe;
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.2);
 }
 .compose-drafts-list {
   list-style: none;
@@ -753,6 +816,29 @@ body {
 .compose-drafts-item-del:hover {
   background: rgba(248, 113, 113, 0.18);
   border-color: rgba(248, 113, 113, 0.55);
+}
+.compose-drafts-item-cover {
+  flex-shrink: 0;
+  width: 62px;
+  height: 62px;
+  border-radius: 10px;
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  background: rgba(15, 23, 42, 0.65);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+}
+.compose-drafts-item-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+.compose-drafts-item-cover .bi {
+  font-size: 1.15rem;
 }
 .compose-drafts-empty {
   text-align: center;

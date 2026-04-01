@@ -1517,10 +1517,30 @@ app.whenReady().then(() => {
     return true;
   });
 
-  const composeDraftsDir = path.join(userDataPath, 'compose-drafts');
+  const composeDraftsLegacyDir = path.join(userDataPath, 'compose-drafts');
+  function getComposeDraftsDir() {
+    try {
+      loadWorkspaceRoot();
+      const root = (workspaceRoot || DEFAULT_WORKSPACE || '').trim();
+      if (root) return path.join(root, '.markwrite', 'compose-drafts');
+    } catch (_) {}
+    return composeDraftsLegacyDir;
+  }
   function ensureComposeDraftsDir() {
-    fs.mkdirSync(composeDraftsDir, { recursive: true });
-    return composeDraftsDir;
+    const dir = getComposeDraftsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    // 兼容迁移：首次切到工作区草稿目录时，把旧 userData 草稿复制过去
+    try {
+      if (dir !== composeDraftsLegacyDir && fs.existsSync(composeDraftsLegacyDir)) {
+        const oldNames = fs.readdirSync(composeDraftsLegacyDir).filter((n) => n.endsWith('.json'));
+        oldNames.forEach((name) => {
+          const from = path.join(composeDraftsLegacyDir, name);
+          const to = path.join(dir, name);
+          if (!fs.existsSync(to)) fs.copyFileSync(from, to);
+        });
+      }
+    } catch (_) {}
+    return dir;
   }
   function isSafeDraftId(id) {
     return typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id);
@@ -1557,6 +1577,7 @@ app.whenReady().then(() => {
             id,
             mode: j.mode === 'book' ? 'book' : 'blog',
             title: typeof j.title === 'string' ? j.title : '',
+            cover: typeof j.cover === 'string' ? j.cover : '',
             updatedAt,
             remoteId,
             assetCount,
