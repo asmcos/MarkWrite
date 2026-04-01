@@ -1056,6 +1056,11 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       await new Promise((resolve, reject) => {
         let settled = false;
         let timer = null;
+        const armTimeout = () => {
+          if (timer) clearTimeout(timer);
+          // 滑动超时：只要仍有回包/分片进度，就持续等待，避免大图误判超时
+          timer = setTimeout(() => done(false, '上传超时（45s）'), 45000);
+        };
         const done = (ok, err) => {
           if (settled) return;
           settled = true;
@@ -1063,10 +1068,11 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
           if (ok) resolve();
           else reject(new Error(err || 'upload failed'));
         };
-        timer = setTimeout(() => done(false, '上传超时（20s）'), 20000);
+        armTimeout();
         try {
           mod.upload_file(remoteName, fileData, pubkeyHex, privkeyBytes, (msg) => {
             try {
+              armTimeout();
               const maybe = msg && Array.isArray(msg) ? msg[2] : msg;
               const pickServerFilePath = (obj) => {
                 if (!obj || typeof obj !== 'object') return '';
@@ -1307,16 +1313,24 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       return await new Promise((resolve) => {
         let settled = false;
         let timer = null;
+        let provisionalId = '';
+        let provisionalDoneTimer = null;
+        const armTimeout = () => {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => done(false, '发布超时（30s）', provisionalId), 30000);
+        };
         const done = (ok, message, id) => {
           if (settled) return;
           settled = true;
           if (timer) clearTimeout(timer);
+           if (provisionalDoneTimer) clearTimeout(provisionalDoneTimer);
           resolve({ ok, message, id });
         };
-        timer = setTimeout(() => done(false, '发布超时（15s）'), 15000);
+        armTimeout();
         try {
           mod.create_blog(JSON.stringify(blogData), pubkeyHex, privkeyBytes, (msg) => {
             try {
+              armTimeout();
               const m = msg && Array.isArray(msg) ? msg[2] : msg;
               if (!m || m === 'EOSE') return;
               if (typeof m === 'object' && m.code != null) {
@@ -1326,11 +1340,19 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
                   return;
                 }
                 if (c === 201) {
-                  done(true, '发布成功', m.id || '');
+                  // 201 仅代表本地/前置生成了 id，不代表服务器发布成功；继续等待 200
+                  provisionalId = m.id || provisionalId;
+                  // 有些服务端偶发不回 200，这里给一个兜底：拿到 201 后短暂等待再按成功处理
+                  if (!provisionalDoneTimer && provisionalId) {
+                    provisionalDoneTimer = setTimeout(
+                      () => done(true, '已生成ID（未收到200确认，按成功处理）', provisionalId),
+                      3500,
+                    );
+                  }
                   return;
                 }
                 if (c >= 200 && c < 300) {
-                  done(true, m.message || '发布成功', m.id || '');
+                  done(true, m.message || '发布成功', m.id || provisionalId || '');
                 }
               }
             } catch (_) {}
@@ -1344,16 +1366,23 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
     return await new Promise((resolve) => {
       let settled = false;
       let timer = null;
+      let provisionalDoneTimer = null;
+      const armTimeout = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => done(false, '发布超时（30s）', remoteId || ''), 30000);
+      };
       const done = (ok, message, id) => {
         if (settled) return;
         settled = true;
         if (timer) clearTimeout(timer);
+        if (provisionalDoneTimer) clearTimeout(provisionalDoneTimer);
         resolve({ ok, message, id });
       };
-      timer = setTimeout(() => done(false, '发布超时（15s）'), 15000);
+      armTimeout();
       try {
-        mod.create_book(bookData, pubkeyHex, privkeyBytes, (msg) => {
+        const cb = (msg) => {
           try {
+            armTimeout();
             const m = msg && Array.isArray(msg) ? msg[2] : msg;
             if (!m || m === 'EOSE') return;
             if (typeof m === 'object' && m.code != null) {
@@ -1363,15 +1392,26 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
                 return;
               }
               if (c === 201) {
-                done(true, '发布成功', m.id || '');
+                // create_book 的 201 仅是生成 id；继续等待 200
+                if (!provisionalDoneTimer && m.id) {
+                  provisionalDoneTimer = setTimeout(
+                    () => done(true, '已生成ID（未收到200确认，按成功处理）', m.id),
+                    3500,
+                  );
+                }
                 return;
               }
               if (c >= 200 && c < 300) {
-                done(true, m.message || '发布成功', m.id || '');
+                done(true, m.message || '发布成功', m.id || remoteId || '');
               }
             }
           } catch (_) {}
-        });
+        };
+        if (remoteId && typeof mod.update_book === 'function') {
+          mod.update_book(bookData, remoteId, pubkeyHex, privkeyBytes, cb);
+        } else {
+          mod.create_book(bookData, pubkeyHex, privkeyBytes, cb);
+        }
       } catch (e) {
         done(false, e && e.message ? e.message : String(e));
       }
