@@ -15,11 +15,22 @@ cd MarkWrite
 npm install
 ```
 
+如在国内网络安装 `electron` 相关依赖较慢或失败，可用：
+
+```bash
+npm run setup:cn
+```
+
+该命令会先切换 npm 源到 `npmmirror` 并设置 electron 镜像，再执行安装与初始化。
+
 ### 3) 初始化（同步主题、构建前端与 vendor）
 
 ```bash
 npm run setup
 ```
+
+> 注意：不能先 `setup` 再 `npm install`。  
+> `setup` 依赖 `node_modules` 中的工具（如 `esbuild`、tailwind CLI），必须先安装依赖。
 
 ### 4) 启动应用
 

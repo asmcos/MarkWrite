@@ -10,6 +10,8 @@
     "start": "npm run build:tailwind && npm run build:esclient && ELECTRON_DISABLE_SANDBOX=1 ELECTRON_OZONE_PLATFORM_HINT=auto ./node_modules/.bin/electron .",
     "sync-preview-theme": "node scripts/sync-preview-theme.mjs",
     "linux:desktop": "node scripts/setup-linux-desktop.mjs",
+    "install:cn": "npm config set registry https://registry.npmmirror.com && ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm install --fetch-retries=5 --fetch-timeout=120000",
+    "setup:cn": "npm run install:cn && npm run setup",
     "update:openagent": "npm install openagent@git+https://github.com/asmcos/openagent.git --save-dev",
     "setup": "npm run update:openagent && npm run sync-preview-theme && npm run vendor:esclient && npm run build:tailwind && npm run build:esclient && npm run linux:desktop"
   },
