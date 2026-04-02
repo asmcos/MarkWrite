@@ -45,9 +45,120 @@ const {
 const { writeEventstoreConfigFromSync } = require('./lib/write-eventstore-config.js');
 
 /** 将当前 Sync 活跃服务器写入 eventstore-vendor/config.cjs 并清 require 缓存，确保 esclient 连到正确 esserver */
+let lastSyncedEsserver = '';
 function syncEventstoreVendorConfig() {
+  let nextEsserver = '';
+  try {
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      const cfg = JSON.parse(raw);
+      const servers = Array.isArray(cfg && cfg.servers) ? cfg.servers : [];
+      const active = servers.find((s) => s.id === cfg.activeId) || servers[0] || null;
+      nextEsserver = active && typeof active.esserver === 'string' ? active.esserver.trim() : '';
+    }
+  } catch (_) {}
+  // 同一服务器不重复失效模块，尽量复用单例 WebSocket 连接
+  if (nextEsserver && nextEsserver === lastSyncedEsserver) return;
   writeEventstoreConfigFromSync(SYNC_CONFIG_FILE);
   invalidateEsclientModule();
+  lastSyncedEsserver = nextEsserver || '';
+}
+
+function readSyncConfigSafe() {
+  try {
+    if (!fs.existsSync(SYNC_CONFIG_FILE)) return { servers: [], activeId: null };
+    const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    return {
+      servers: Array.isArray(data.servers) ? data.servers : [],
+      activeId: typeof data.activeId === 'string' ? data.activeId : null,
+    };
+  } catch (_) {
+    return { servers: [], activeId: null };
+  }
+}
+
+function getActiveSyncServerId(syncCfg) {
+  const servers = Array.isArray(syncCfg && syncCfg.servers) ? syncCfg.servers : [];
+  return (syncCfg && syncCfg.activeId) || (servers[0] && servers[0].id) || 'default';
+}
+
+function normalizeIdentityRecord(v) {
+  const x = v && typeof v === 'object' ? v : {};
+  const pubkeyHex = typeof x.pubkeyHex === 'string'
+    ? x.pubkeyHex.trim()
+    : (typeof x.pubkey === 'string' ? x.pubkey.trim() : '');
+  return {
+    pubkeyHex,
+    pubkeyEpub: typeof x.pubkeyEpub === 'string' ? x.pubkeyEpub.trim() : '',
+    // 兼容旧字段
+    pubkey: pubkeyHex,
+    privkey: typeof x.privkey === 'string' ? x.privkey.trim() : '',
+  };
+}
+
+function hasIdentityData(v) {
+  return !!(v && (v.pubkeyHex || v.pubkey || v.pubkeyEpub || v.privkey));
+}
+
+function readIdentityStoreRaw() {
+  try {
+    if (!fs.existsSync(IDENTITY_FILE)) return null;
+    const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function readIdentityForServer(serverId) {
+  const sid = typeof serverId === 'string' && serverId.trim() ? serverId.trim() : 'default';
+  const raw = readIdentityStoreRaw();
+  if (!raw) return normalizeIdentityRecord({});
+  if (raw && typeof raw === 'object' && raw.byServer && typeof raw.byServer === 'object') {
+    return normalizeIdentityRecord(raw.byServer[sid] || {});
+  }
+  // 兼容旧格式（全局单身份）
+  const legacy = normalizeIdentityRecord(raw);
+  if (!hasIdentityData(legacy)) return legacy;
+  const legacyServerId = getActiveSyncServerId(readSyncConfigSafe());
+  return sid === legacyServerId ? legacy : normalizeIdentityRecord({});
+}
+
+function saveIdentityForServer(serverId, identity) {
+  const sid = typeof serverId === 'string' && serverId.trim() ? serverId.trim() : 'default';
+  const next = normalizeIdentityRecord(identity);
+  const raw = readIdentityStoreRaw();
+  const store = { version: 2, byServer: {} };
+
+  if (raw && typeof raw === 'object' && raw.byServer && typeof raw.byServer === 'object') {
+    Object.keys(raw.byServer).forEach((k) => {
+      store.byServer[k] = normalizeIdentityRecord(raw.byServer[k]);
+    });
+  } else if (raw && typeof raw === 'object') {
+    // 迁移旧格式：挂到当前 active server 下
+    const legacy = normalizeIdentityRecord(raw);
+    if (hasIdentityData(legacy)) {
+      const cfg = readSyncConfigSafe();
+      const legacyServerId = getActiveSyncServerId(cfg);
+      store.byServer[legacyServerId] = legacy;
+    }
+  }
+
+  if (hasIdentityData(next)) {
+    store.byServer[sid] = next;
+  } else {
+    delete store.byServer[sid];
+  }
+
+  if (!Object.keys(store.byServer).length) {
+    try {
+      if (fs.existsSync(IDENTITY_FILE)) fs.unlinkSync(IDENTITY_FILE);
+    } catch (_) {}
+    return;
+  }
+  fs.mkdirSync(MARKWRITE_CFG_DIR, { recursive: true });
+  fs.writeFileSync(IDENTITY_FILE, JSON.stringify(store, null, 2), 'utf8');
 }
 
 function createServer() {
@@ -592,15 +703,66 @@ ipcMain.handle('sync:saveConfig', async (_event, payload) => {
   }
 });
 
-// 身份配置：读写 ~/.config/markwrite/identity.json
-ipcMain.handle('identity:get', async () => {
+ipcMain.handle('sync:getConnectionStatus', async () => {
   try {
-    if (fs.existsSync(IDENTITY_FILE)) {
-      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
-      const data = JSON.parse(raw);
-      const pubkeyHex = typeof data.pubkeyHex === 'string'
-        ? data.pubkeyHex
-        : (typeof data.pubkey === 'string' ? data.pubkey : '');
+    const syncCfg = readSyncConfigSafe();
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeId = syncCfg.activeId || (servers[0] && servers[0].id) || null;
+    const activeServer = servers.find((s) => s.id === activeId) || servers[0] || null;
+    const esserver = activeServer && typeof activeServer.esserver === 'string' ? activeServer.esserver.trim() : '';
+    if (!esserver) {
+      return {
+        ok: false,
+        status: 'idle',
+        message: '未配置 esserver',
+        serverId: activeId || '',
+        serverName: activeServer && activeServer.name ? activeServer.name : '',
+        esserver: '',
+      };
+    }
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    if (!mod || typeof mod.ensure_connected !== 'function') {
+      return {
+        ok: false,
+        status: 'disconnected',
+        message: 'esclient 缺少 ensure_connected',
+        serverId: activeId || '',
+        serverName: activeServer && activeServer.name ? activeServer.name : '',
+        esserver,
+      };
+    }
+    const r = await mod.ensure_connected(6000);
+    return {
+      ok: !!(r && r.ok),
+      status: r && r.ok ? 'connected' : 'disconnected',
+      message: r && r.message ? r.message : '',
+      serverId: activeId || '',
+      serverName: activeServer && activeServer.name ? activeServer.name : '',
+      esserver,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      status: 'disconnected',
+      message: e && e.message ? e.message : String(e),
+      serverId: '',
+      serverName: '',
+      esserver: '',
+    };
+  }
+});
+
+// 身份配置：读写 ~/.config/markwrite/identity.json
+ipcMain.handle('identity:get', async (_event, payload) => {
+  const syncCfg0 = readSyncConfigSafe();
+  const requestedServerId = payload && typeof payload.serverId === 'string' && payload.serverId.trim()
+    ? payload.serverId.trim()
+    : getActiveSyncServerId(syncCfg0);
+  try {
+    const data = readIdentityForServer(requestedServerId);
+    if (hasIdentityData(data)) {
+      const pubkeyHex = typeof data.pubkeyHex === 'string' ? data.pubkeyHex : '';
       let pubkeyEpub = typeof data.pubkeyEpub === 'string' ? data.pubkeyEpub : '';
       try {
         if (!pubkeyEpub && pubkeyHex) {
@@ -627,6 +789,7 @@ ipcMain.handle('identity:get', async () => {
         } catch (_) {}
       }
       return {
+        serverId: requestedServerId,
         pubkey: pubkeyEpub || pubkeyHex || '',
         pubkeyHex,
         pubkeyEpub,
@@ -635,7 +798,14 @@ ipcMain.handle('identity:get', async () => {
       };
     }
   } catch (_) {}
-  return { pubkey: '', pubkeyHex: '', pubkeyEpub: '', privkey: '', privkeyHex: '' };
+  return {
+    serverId: requestedServerId,
+    pubkey: '',
+    pubkeyHex: '',
+    pubkeyEpub: '',
+    privkey: '',
+    privkeyHex: '',
+  };
 });
 
 ipcMain.handle('identity:save', async (_event, payload) => {
@@ -644,15 +814,17 @@ ipcMain.handle('identity:save', async (_event, payload) => {
       // eslint-disable-next-line global-require, import/no-extraneous-dependencies
       eventstoreKeyLib = require('eventstore-tools/src/key');
     }
-    fs.mkdirSync(MARKWRITE_CFG_DIR, { recursive: true });
+    const syncCfg = readSyncConfigSafe();
+    const fallbackServerId = getActiveSyncServerId(syncCfg);
+    const serverId = payload && typeof payload.serverId === 'string' && payload.serverId.trim()
+      ? payload.serverId.trim()
+      : fallbackServerId;
     const rawPub = payload && typeof payload.pubkey === 'string' ? payload.pubkey.trim() : '';
     const privkey = payload && typeof payload.privkey === 'string' ? payload.privkey.trim() : '';
 
     // 退出登录：清空 pubkey+privkey 时直接删除文件，避免残留空 JSON 导致前端/状态不一致
     if (!rawPub && !privkey) {
-      try {
-        if (fs.existsSync(IDENTITY_FILE)) fs.unlinkSync(IDENTITY_FILE);
-      } catch (_) {}
+      saveIdentityForServer(serverId, { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' });
       return { ok: true, pubkeyHex: '', pubkeyEpub: '' };
     }
 
@@ -705,7 +877,7 @@ ipcMain.handle('identity:save', async (_event, payload) => {
       pubkey: pubkeyHex,
       privkey,
     };
-    fs.writeFileSync(IDENTITY_FILE, JSON.stringify(toSave, null, 2), 'utf8');
+    saveIdentityForServer(serverId, toSave);
     let privkeyHexOut = '';
     if (privkey && privkey.startsWith('esec')) {
       try {
@@ -776,11 +948,7 @@ ipcMain.handle('identity:fetchProfile', async () => {
     const esserver = (activeServer && activeServer.esserver) || '';
     if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
 
-    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
-    if (fs.existsSync(IDENTITY_FILE)) {
-      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
-      identity = JSON.parse(raw);
-    }
+    const identity = readIdentityForServer(activeId);
     const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
       || (identity.pubkey && String(identity.pubkey).trim())
       || '';
@@ -812,11 +980,7 @@ ipcMain.handle('identity:registerOnServer', async (_event, payload) => {
       return { ok: true, skipped: true, message: '未配置 EventStore WebSocket，已跳过服务器注册' };
     }
 
-    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
-    if (fs.existsSync(IDENTITY_FILE)) {
-      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
-      identity = JSON.parse(raw);
-    }
+    const identity = readIdentityForServer(syncCfg.activeId || (servers[0] && servers[0].id) || 'default');
     const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
       || (identity.pubkey && String(identity.pubkey).trim())
       || '';
@@ -846,11 +1010,7 @@ ipcMain.handle('identity:saveProfile', async (_event, profile) => {
     const esserver = (activeServer && activeServer.esserver) || '';
     if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
 
-    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
-    if (fs.existsSync(IDENTITY_FILE)) {
-      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
-      identity = JSON.parse(raw);
-    }
+    const identity = readIdentityForServer(syncCfg.activeId || (servers[0] && servers[0].id) || 'default');
     const pubkey = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
       || (identity.pubkey && String(identity.pubkey).trim())
       || '';
@@ -874,6 +1034,8 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
   try {
     const p = payload && typeof payload === 'object' ? payload : {};
     const requestId = typeof p.requestId === 'string' ? p.requestId : '';
+    const uploadTraceId = requestId || `up-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const logUpload = (...args) => console.log(`[compose-upload][${uploadTraceId}]`, ...args);
     const emitProgress = (data) => {
       try {
         if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -892,14 +1054,11 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       || '';
     const esserver = (activeServer && typeof activeServer.esserver === 'string' ? activeServer.esserver.trim() : '')
       || '';
+    logUpload('start', { hasServer: Boolean(esserver), hasUploadBase: Boolean(uploadBase) });
     if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
     if (!uploadBase) return { ok: false, message: '请先在 Sync & Servers 中配置 uploadpath（用于生成图片访问地址）' };
 
-    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
-    if (fs.existsSync(IDENTITY_FILE)) {
-      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
-      identity = JSON.parse(raw);
-    }
+    const identity = readIdentityForServer(syncCfg.activeId || (servers[0] && servers[0].id) || 'default');
     const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
       || (identity.pubkey && String(identity.pubkey).trim())
       || '';
@@ -965,6 +1124,7 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
     const targets = Array.from(toUpload).filter((rel) => fs.existsSync(path.join(uploadsDir, path.basename(rel))));
     const totalFiles = targets.length;
     let completedFiles = 0;
+    logUpload('scan-finished', { totalRefs: toUpload.size, existingLocalFiles: totalFiles, targets });
 
     emitProgress({
       phase: 'start',
@@ -975,6 +1135,7 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
     });
 
     if (!totalFiles) {
+      logUpload('no-local-files-to-upload, return directly');
       return {
         ok: true,
         uploaded: uploadedMap,
@@ -1022,12 +1183,20 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       const localPath = path.join(uploadsDir, baseName);
       const buf = fs.readFileSync(localPath);
       const sha256 = createHash('sha256').update(buf).digest('hex');
+      logUpload('file-begin', {
+        index: fileIndex + 1,
+        totalFiles,
+        rel,
+        bytes: buf.length,
+        sha256: sha256.slice(0, 12),
+      });
 
       const prev = prevAssetMap[rel];
       if (prev && prev.sha256 === sha256 && typeof prev.fileUrl === 'string' && prev.fileUrl.trim()) {
         const url = mkPublicUrl(prev.fileUrl);
         uploadedMap[rel] = url;
         nextAssetMap[rel] = { sha256, fileUrl: prev.fileUrl };
+        logUpload('file-reused', { rel, fileUrl: prev.fileUrl, publicUrl: url });
         completedFiles += 1;
         emitProgress({
           phase: 'file_done',
@@ -1065,6 +1234,7 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
           if (settled) return;
           settled = true;
           if (timer) clearTimeout(timer);
+          logUpload('file-finish', { rel, ok, err: err || '', serverReturnedPath: serverReturnedPath || '' });
           if (ok) resolve();
           else reject(new Error(err || 'upload failed'));
         };
@@ -1131,6 +1301,14 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
                 const picked = pickServerFilePath(maybe);
                 if (picked) serverReturnedPath = picked;
               }
+              if (maybe && typeof maybe === 'object' && maybe.code != null) {
+                logUpload('file-callback', {
+                  rel,
+                  code: Number(maybe.code),
+                  message: typeof maybe.message === 'string' ? maybe.message : '',
+                  id: maybe.id || '',
+                });
+              }
               if (maybe && typeof maybe === 'object' && maybe.code != null && Number(maybe.code) >= 400) {
                 done(false, maybe.message || `服务器错误 (${maybe.code})`);
                 return;
@@ -1150,6 +1328,7 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       uploadedMap[rel] = mkPublicUrl(serverReturnedPath || remoteName);
       // 记录服务端返回的 fileUrl/path（不强制是文件名；优先用服务端返回值）
       nextAssetMap[rel] = { sha256, fileUrl: serverReturnedPath || remoteName };
+      logUpload('file-mapped', { rel, finalFileUrl: nextAssetMap[rel].fileUrl, publicUrl: uploadedMap[rel] });
       completedFiles += 1;
       emitProgress({
         phase: 'file_done',
@@ -1183,6 +1362,10 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       overallPercent: 100,
       message: `上传完成 ${completedFiles}/${totalFiles}`,
     });
+    logUpload('all-done', {
+      uploadedCount: Object.keys(uploadedMap).length,
+      assetMapCount: Object.keys(nextAssetMap).length,
+    });
 
     return {
       ok: true,
@@ -1192,6 +1375,7 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       content: dedupeUploadsInText(rewrite(content)),
     };
   } catch (e) {
+    console.error('[compose-upload][fatal]', e);
     try {
       const requestId = payload && typeof payload === 'object' && typeof payload.requestId === 'string'
         ? payload.requestId
@@ -1211,6 +1395,8 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
 ipcMain.handle('compose:createContent', async (_event, payload) => {
   try {
     const p = payload && typeof payload === 'object' ? payload : {};
+    const publishTraceId = `pub-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const logPublish = (...args) => console.log(`[compose-publish][${publishTraceId}]`, ...args);
     const mode = p.mode === 'book' ? 'book' : 'blog';
     const title = String(p.title || '').trim();
     if (!title) return { ok: false, message: '标题不能为空' };
@@ -1226,11 +1412,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       || '';
     if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
 
-    let identity = { pubkeyHex: '', pubkeyEpub: '', pubkey: '', privkey: '' };
-    if (fs.existsSync(IDENTITY_FILE)) {
-      const raw = fs.readFileSync(IDENTITY_FILE, 'utf8');
-      identity = JSON.parse(raw);
-    }
+    const identity = readIdentityForServer(syncCfg.activeId || (servers[0] && servers[0].id) || 'default');
     const pubkeyHex = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
       || (identity.pubkey && String(identity.pubkey).trim())
       || '';
@@ -1265,6 +1447,14 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       content: typeof p.content === 'string' ? p.content : '',
     };
     const remoteId = typeof p.remoteId === 'string' ? p.remoteId.trim() : '';
+    logPublish('start', {
+      mode,
+      titleLen: title.length,
+      hasRemoteId: Boolean(remoteId),
+      tagsCount: normalized.tags.length,
+      contentLen: normalized.content.length,
+      cover: normalized.cover,
+    });
 
     /** 与线上一致：封面只存文件名，不带域名 */
     function coverToFileNameOnly(cover) {
@@ -1323,11 +1513,13 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
           if (settled) return;
           settled = true;
           if (timer) clearTimeout(timer);
-           if (provisionalDoneTimer) clearTimeout(provisionalDoneTimer);
+          if (provisionalDoneTimer) clearTimeout(provisionalDoneTimer);
+          logPublish('finish', { mode: 'blog', ok, message, id: id || provisionalId || '' });
           resolve({ ok, message, id });
         };
         armTimeout();
         try {
+          logPublish('invoke create_blog', { hasBlogId: Boolean(blogData.blogId), blogId: blogData.blogId || '' });
           mod.create_blog(JSON.stringify(blogData), pubkeyHex, privkeyBytes, (msg) => {
             try {
               armTimeout();
@@ -1335,6 +1527,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
               if (!m || m === 'EOSE') return;
               if (typeof m === 'object' && m.code != null) {
                 const c = Number(m.code);
+                logPublish('callback', { mode: 'blog', code: c, message: m.message || '', id: m.id || '' });
                 if (c >= 400) {
                   done(false, m.message || `服务器错误 (${c})`);
                   return;
@@ -1376,6 +1569,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
         settled = true;
         if (timer) clearTimeout(timer);
         if (provisionalDoneTimer) clearTimeout(provisionalDoneTimer);
+        logPublish('finish', { mode: 'book', ok, message, id: id || remoteId || '' });
         resolve({ ok, message, id });
       };
       armTimeout();
@@ -1387,6 +1581,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
             if (!m || m === 'EOSE') return;
             if (typeof m === 'object' && m.code != null) {
               const c = Number(m.code);
+              logPublish('callback', { mode: 'book', code: c, message: m.message || '', id: m.id || '' });
               if (c >= 400) {
                 done(false, m.message || `服务器错误 (${c})`);
                 return;
@@ -1408,8 +1603,10 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
           } catch (_) {}
         };
         if (remoteId && typeof mod.update_book === 'function') {
+          logPublish('invoke update_book', { remoteId });
           mod.update_book(bookData, remoteId, pubkeyHex, privkeyBytes, cb);
         } else {
+          logPublish('invoke create_book', { hasBookId: Boolean(bookData.bookId), bookId: bookData.bookId || '' });
           mod.create_book(bookData, pubkeyHex, privkeyBytes, cb);
         }
       } catch (e) {
@@ -1417,6 +1614,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       }
     });
   } catch (e) {
+    console.error('[compose-publish][fatal]', e);
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
 });

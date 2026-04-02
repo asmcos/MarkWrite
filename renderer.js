@@ -369,6 +369,8 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   const container = document.getElementById('monaco-container');
   const editorFilename = document.getElementById('editor-filename');
+  const syncConnStatus = document.getElementById('sync-conn-status');
+  const syncConnText = document.getElementById('sync-conn-text');
   // 旧的文件操作按钮（已在 UI 隐藏，仍可复用其逻辑）
   const btnOpen = document.getElementById('btn-open');
   const btnToggleExplorer = document.getElementById('btn-toggle-explorer');
@@ -391,7 +393,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const menuContentNewBook = document.getElementById('menu-content-new-book');
   const menuContentDraftsBlog = document.getElementById('menu-content-drafts-blog');
   const menuContentDraftsBook = document.getElementById('menu-content-drafts-book');
-  const menuContentRemoteBlog = document.getElementById('menu-content-remote-blog');
+  const menuContentRemoteBlogMine = document.getElementById('menu-content-remote-blog-mine');
+  const menuContentRemoteBlogAll = document.getElementById('menu-content-remote-blog-all');
   const menuContentRemoteBook = document.getElementById('menu-content-remote-book');
   const contentComposePanel = document.getElementById('content-compose-panel');
   const contentComposeTitle = document.getElementById('content-compose-title');
@@ -651,9 +654,153 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Sync 服务器配置：当前仅在内存中维护一组 profile，后续可接入持久化
   let syncServers = [];
   let activeSyncServerId = null;
+  const syncConnState = {
+    status: 'idle', // idle | connecting | connected | disconnected
+    serverId: '',
+    esserver: '',
+    inflight: false,
+    pollTimer: null,
+    restartTimer: null,
+    generation: 0,
+  };
 
   function getActiveSyncServer() {
     return syncServers.find((s) => s.id === activeSyncServerId) || syncServers[0] || null;
+  }
+
+  function getActiveSyncServerIdForIdentity() {
+    return activeSyncServerId || (syncServers[0] && syncServers[0].id) || '';
+  }
+
+  function setSyncConnStatus(status, text, title) {
+    syncConnState.status = status;
+    if (syncConnStatus) {
+      syncConnStatus.classList.remove('is-idle', 'is-connecting', 'is-connected', 'is-disconnected');
+      syncConnStatus.classList.add(
+        status === 'connected'
+          ? 'is-connected'
+          : status === 'connecting'
+            ? 'is-connecting'
+            : status === 'disconnected'
+              ? 'is-disconnected'
+              : 'is-idle',
+      );
+      if (title) syncConnStatus.title = title;
+    }
+    if (syncConnText) syncConnText.textContent = text || '服务器：未检测';
+  }
+
+  function clearSyncConnTimers() {
+    if (syncConnState.pollTimer) {
+      clearTimeout(syncConnState.pollTimer);
+      syncConnState.pollTimer = null;
+    }
+    if (syncConnState.restartTimer) {
+      clearTimeout(syncConnState.restartTimer);
+      syncConnState.restartTimer = null;
+    }
+  }
+
+  function scheduleSyncConnRestart(delayMs = 500) {
+    if (syncConnState.restartTimer) clearTimeout(syncConnState.restartTimer);
+    syncConnState.restartTimer = setTimeout(() => {
+      syncConnState.restartTimer = null;
+      startSyncConnMonitor();
+    }, delayMs);
+  }
+
+  function startSyncConnMonitor() {
+    clearSyncConnTimers();
+    syncConnState.generation += 1;
+    const gen = syncConnState.generation;
+    const active = getActiveSyncServer();
+    const serverId = (active && active.id) || '';
+    const serverName = (active && active.name) || '';
+    const esserver = (active && typeof active.esserver === 'string') ? active.esserver.trim() : '';
+    syncConnState.serverId = serverId;
+    syncConnState.esserver = esserver;
+    syncConnState.inflight = false;
+
+    if (!esserver) {
+      setSyncConnStatus('idle', '服务器：未配置', '请在设置里填写 esserver');
+      return;
+    }
+
+    const runCheck = () => {
+      if (gen !== syncConnState.generation) return;
+      if (syncConnState.inflight) return;
+      syncConnState.inflight = true;
+      setSyncConnStatus('connecting', `服务器：正在连接（未就绪） (${serverName || serverId || '未命名'})`, esserver);
+      const api = window.markwrite && window.markwrite.api;
+      if (!api || typeof api.syncGetConnectionStatus !== 'function') {
+        syncConnState.inflight = false;
+        setSyncConnStatus('idle', '服务器：状态不可用', '当前环境不支持连接状态检测');
+        return;
+      }
+      api.syncGetConnectionStatus().then((res) => {
+        if (gen !== syncConnState.generation) return;
+        const status = (res && res.status) || '';
+        const msg = (res && res.message) ? String(res.message) : '';
+        const title = `${esserver}${msg ? `\n${msg}` : ''}`;
+        if (status === 'connected' && res && res.ok) {
+          setSyncConnStatus('connected', `服务器：已连接 (${serverName || serverId || '未命名'})`, title);
+          return;
+        }
+        if (status === 'idle') {
+          setSyncConnStatus('idle', `服务器：未配置 (${serverName || serverId || '未命名'})`, title);
+          return;
+        }
+        setSyncConnStatus(
+          'disconnected',
+          `服务器：连接失败 (${serverName || serverId || '未命名'})${msg ? `：${msg}` : ''}`,
+          title,
+        );
+      }).catch((e) => {
+        if (gen !== syncConnState.generation) return;
+        const msg = e && e.message ? e.message : String(e);
+        setSyncConnStatus('disconnected', `服务器：连接失败 (${serverName || serverId || '未命名'})：${msg}`, `${esserver}\n${msg}`);
+      }).finally(() => {
+        syncConnState.inflight = false;
+        if (gen !== syncConnState.generation) return;
+        syncConnState.pollTimer = setTimeout(() => {
+          syncConnState.pollTimer = null;
+          runCheck();
+        }, 8000);
+      });
+    };
+
+    runCheck();
+  }
+
+  function hydrateIdentityUiFromRecord(id) {
+    const hasPriv = !!(id && id.privkey && typeof id.privkey === 'string' && id.privkey.trim());
+    identityHasExisting = hasPriv;
+    const displayPub = (id && (id.pubkeyEpub || id.pubkey || id.pubkeyHex)) || '';
+    const pubEl = document.getElementById('settings-identity-pubkey');
+    const privEl = document.getElementById('settings-identity-privkey');
+    if (pubEl) pubEl.value = displayPub;
+    if (privEl) privEl.value = (id && id.privkey) || '';
+    refreshIdentityKeyHexCacheFromIdentity(id);
+    if (settingsIdentityEmptyHint) {
+      settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
+    }
+    if (identityHasExisting) identityLoginMode = 'paste';
+    else if (identityLoginMode !== 'new') identityLoginMode = 'paste';
+    applyIdentityLoginMode();
+    if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
+  }
+
+  function loadIdentityForActiveServer() {
+    if (!window.markwrite?.api?.identityGet) return;
+    const nonce = ++identityPrefillNonce;
+    const sid = getActiveSyncServerIdForIdentity();
+    window.markwrite.api.identityGet({ serverId: sid }).then((id) => {
+      if (nonce !== identityPrefillNonce) return;
+      hydrateIdentityUiFromRecord(id || {});
+    }).catch(() => {
+      if (nonce !== identityPrefillNonce) return;
+      hydrateIdentityUiFromRecord({});
+    });
   }
 
   /**
@@ -697,6 +844,8 @@ window.addEventListener('DOMContentLoaded', async () => {
         activeSyncServerId = srv.id;
         renderSyncServerList();
         fillSyncFormFromActive();
+        loadIdentityForActiveServer();
+        startSyncConnMonitor();
       });
       settingsSyncServerList.appendChild(li);
     });
@@ -727,6 +876,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (currentSettingsTab === 'identity-profile') {
       renderProfileAvatarPreview(profileServerAvatarUrl);
     }
+    scheduleSyncConnRestart(700);
   }
 
   function getChatWidth() {
@@ -882,14 +1032,21 @@ window.addEventListener('DOMContentLoaded', async () => {
         activeSyncServerId = cfg.activeId || (syncServers[0] && syncServers[0].id) || null;
         renderSyncServerList();
         fillSyncFormFromActive();
+        loadIdentityForActiveServer();
+        startSyncConnMonitor();
       }).catch(() => {
         // 失败时仍使用内存中的默认结构（可能为空）
         renderSyncServerList();
         fillSyncFormFromActive();
+        loadIdentityForActiveServer();
+        startSyncConnMonitor();
       });
     } else {
       renderSyncServerList();
       fillSyncFormFromActive();
+      if (window.markwrite?.api?.identityGet) loadIdentityForActiveServer();
+      else hydrateIdentityUiFromRecord({});
+      startSyncConnMonitor();
     }
     // 预填 Workspace 只读展示
     if (settingsWorkspaceCurrent && window.markwrite?.api?.getDefaultWorkspace) {
@@ -898,45 +1055,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         settingsWorkspaceCurrent.value = r.path || '';
       }).catch(() => {});
     }
-    // 预填 Identity（可选）
-    if (window.markwrite?.api?.identityGet) {
-      const nonce = ++identityPrefillNonce;
-      window.markwrite.api.identityGet().then((id) => {
-        if (nonce !== identityPrefillNonce) return;
-        if (!id) return;
-        const hasPriv = !!(id.privkey && typeof id.privkey === 'string' && id.privkey.trim());
-        // 已登录仅当本地确实有私钥（privkey）时成立；
-        // 仅有公钥（pubkey/epub）但没有私钥时，仍应允许用户粘贴 ESEC。
-        identityHasExisting = hasPriv;
-        const displayPub = id.pubkeyEpub || id.pubkey || id.pubkeyHex || '';
-        const pubEl = document.getElementById('settings-identity-pubkey');
-        const privEl = document.getElementById('settings-identity-privkey');
-        if (pubEl) pubEl.value = displayPub;
-        if (privEl) {
-          privEl.value = id.privkey || '';
-        }
-        refreshIdentityKeyHexCacheFromIdentity(id);
-        if (settingsIdentityEmptyHint) {
-          settingsIdentityEmptyHint.style.display = identityHasExisting ? 'none' : 'block';
-        }
-        // 异步 identityGet 晚到时不应覆盖用户已点的「新用户（邮箱）」；已登录则必须回到粘贴态（隐藏邮箱行）
-        if (identityHasExisting) identityLoginMode = 'paste';
-        else if (identityLoginMode !== 'new') identityLoginMode = 'paste';
-        applyIdentityLoginMode();
-        if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
-      }).catch(() => {
-        if (nonce !== identityPrefillNonce) return;
-        identityHasExisting = false;
-        if (settingsIdentityEmptyHint) settingsIdentityEmptyHint.style.display = 'block';
-        if (identityLoginMode !== 'new') identityLoginMode = 'paste';
-        applyIdentityLoginMode();
-      });
-    } else if (settingsIdentityEmptyHint) {
-      identityHasExisting = false;
-      settingsIdentityEmptyHint.style.display = 'block';
-      if (identityLoginMode !== 'new') identityLoginMode = 'paste';
-      applyIdentityLoginMode();
-    }
+    // 预填 Identity（由 sync 配置加载完成后再执行，避免 serverId 竞态）
   }
 
   function closeSettingsModal() {
@@ -1088,7 +1207,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (window.markwrite?.api?.identityGet) {
-      window.markwrite.api.identityGet().then((id) => {
+      window.markwrite.api.identityGet({ serverId: getActiveSyncServerIdForIdentity() }).then((id) => {
         refreshIdentityKeyHexCacheFromIdentity(id);
         finishHydrate();
       }).catch(() => { finishHydrate(); });
@@ -1110,7 +1229,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       updateProfileHeroNameDisplay((settingsProfileNameInput && settingsProfileNameInput.value) || '');
     }
     return window.markwrite.api.identityFetchProfile().then((res) => {
-      console.log('[identity:fetchProfile] response:', res);
       const nameEl = document.getElementById('settings-profile-name');
       const titleEl = document.getElementById('settings-profile-title');
       const bioEl = document.getElementById('settings-profile-bio');
@@ -1264,6 +1382,8 @@ window.addEventListener('DOMContentLoaded', async () => {
           activeSyncServerId = cfg.activeId || (syncServers[0] && syncServers[0].id) || null;
           renderSyncServerList();
           fillSyncFormFromActive();
+          loadIdentityForActiveServer();
+          startSyncConnMonitor();
         }).catch(() => {});
       }
     });
@@ -1288,7 +1408,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         (ok) => {
           if (!ok) return;
           const payload = { pubkey: '', privkey: '' };
-          window.markwrite.api.identitySave(payload).then((res) => {
+          window.markwrite.api.identitySave({
+            ...payload,
+            serverId: getActiveSyncServerIdForIdentity(),
+          }).then((res) => {
             if (res && res.ok) {
               identityPrefillNonce += 1;
               identityHasExisting = false;
@@ -1350,7 +1473,10 @@ window.addEventListener('DOMContentLoaded', async () => {
           privkey: privElSave ? privElSave.value.trim() : '',
         };
         try {
-          const res = await window.markwrite.api.identitySave(payload);
+          const res = await window.markwrite.api.identitySave({
+            ...payload,
+            serverId: getActiveSyncServerIdForIdentity(),
+          });
           if (res && res.ok) {
             refreshIdentityKeyHexCacheFromIdentity(res);
             const emailForServer = identityLoginMode === 'new'
@@ -1365,7 +1491,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (currentSettingsTab === 'identity-profile') syncProfileIdentityKeys();
             if (identityHasExisting) {
               if (window.markwrite?.api?.identityGet) {
-                window.markwrite.api.identityGet().then((id) => {
+                window.markwrite.api.identityGet({ serverId: getActiveSyncServerIdForIdentity() }).then((id) => {
                   if (!id) return;
                   const displayPub = id.pubkeyEpub || id.pubkey || id.pubkeyHex || '';
                   const pubEl = document.getElementById('settings-identity-pubkey');
@@ -1699,6 +1825,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       activeSyncServerId = srv.id;
       renderSyncServerList();
       fillSyncFormFromActive();
+      loadIdentityForActiveServer();
+      startSyncConnMonitor();
     });
   }
 
@@ -1726,6 +1854,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       activeSyncServerId = srv.id;
       renderSyncServerList();
       fillSyncFormFromActive();
+      loadIdentityForActiveServer();
+      startSyncConnMonitor();
     });
   }
 
@@ -2027,8 +2157,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     setComposeDraftFilter('book');
     openComposeDraftsModal();
   });
-  if (menuContentRemoteBlog) menuContentRemoteBlog.addEventListener('click', () => {
-    showAppAlert('远程博客列表下一步接入。');
+  if (menuContentRemoteBlogMine) menuContentRemoteBlogMine.addEventListener('click', () => {
+    showAppAlert('远程博客（我的）列表下一步接入。');
+  });
+  if (menuContentRemoteBlogAll) menuContentRemoteBlogAll.addEventListener('click', () => {
+    showAppAlert('远程博客（全部）列表下一步接入。');
   });
   if (menuContentRemoteBook) menuContentRemoteBook.addEventListener('click', () => {
     showAppAlert('远程书籍列表下一步接入。');
@@ -2208,6 +2341,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (contentComposePublish) {
     contentComposePublish.addEventListener('click', () => {
+      if (syncConnState.status !== 'connected') {
+        showAppAlert('当前服务器未连接，请先确认状态栏为“已连接”后再发布。');
+        return;
+      }
       const payload = {
         mode: composeState.mode || 'blog',
         ...readComposeDraftFromUi(),
@@ -2624,6 +2761,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // 启动时加载一次文件树（默认 root = ~/markwrite-docs，未保存过则用该工作区）
   (async () => {
+    if (window.markwrite?.api?.syncGetConfig) {
+      try {
+        const cfg = await window.markwrite.api.syncGetConfig();
+        if (cfg) {
+          syncServers = Array.isArray(cfg.servers) ? cfg.servers.slice() : [];
+          activeSyncServerId = cfg.activeId || (syncServers[0] && syncServers[0].id) || null;
+        }
+      } catch (_) {}
+    }
+    startSyncConnMonitor();
     if (!fileRootPath && window.markwrite?.api?.getDefaultWorkspace) {
       try {
         const r = await window.markwrite.api.getDefaultWorkspace();

@@ -116,6 +116,47 @@ function readLocalFile(p) {
   return fs.readFileSync(abs, 'utf8');
 }
 
+function patchEsclientExtensions(source) {
+  let out = source;
+  // config import 统一到 .cjs
+  out = out.replace(
+    /import\s*\{\s*esserver\s*\}\s*from\s*["']\.\/config["']/,
+    "import { esserver } from './config.cjs'",
+  );
+
+  // 统一 WebSocketClient 参数：限制无限重连
+  out = out.replace(
+    /let\s+client\s*=\s*new\s+WebSocketClient\(\s*esserver\s*(?:,\s*\{[\s\S]*?\})?\s*\)\s*;?/m,
+    `let client = new WebSocketClient(esserver, {
+  autoReconnect: true,
+  reconnectInterval: 3000,
+  maxReconnectAttempts: 5,
+});`,
+  );
+
+  // 注入连接探测辅助函数（如不存在）
+  if (!/export\s+async\s+function\s+ensure_connected\s*\(/.test(out)) {
+    const ensureFn = `
+export async function ensure_connected(timeoutMs = 6000){
+  try {
+    await Promise.race([
+      client.connect(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(\`connect timeout \${timeoutMs}ms\`)), timeoutMs)),
+    ]);
+    return { ok: true };
+  } catch (error:any) {
+    return { ok: false, message: error && error.message ? error.message : String(error) };
+  }
+}
+`;
+    out = out.replace(
+      /function\s+getId\s*\(tempEvent\)\s*\{[\s\S]*?\n\}/m,
+      (m) => `${m}\n${ensureFn}`,
+    );
+  }
+  return out;
+}
+
 let text;
 const local = process.env.ESCLIENT_LOCAL;
 if (local) {
@@ -150,10 +191,7 @@ if (!text) {
   }
 }
 
-text = text.replace(
-  /import\s*\{\s*esserver\s*\}\s*from\s*["']\.\/config["']/,
-  "import { esserver } from './config.cjs'",
-);
+text = patchEsclientExtensions(text);
 fs.mkdirSync(vendor, { recursive: true });
 fs.writeFileSync(src, text, 'utf8');
 console.log('Wrote', src);

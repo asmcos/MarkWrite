@@ -183,6 +183,31 @@ body {
 .menu-dropdown button:hover {
   background: rgba(30, 64, 175, 0.9);
 }
+.menu-submenu {
+  position: relative;
+}
+.menu-submenu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.menu-submenu-panel {
+  position: absolute;
+  top: -4px;
+  left: calc(100% - 4px);
+  min-width: 138px;
+  padding: 4px 0;
+  background: #020617;
+  border-radius: 8px;
+  border: 1px solid rgba(30, 64, 175, 0.7);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+  display: none;
+  z-index: 2100;
+}
+.menu-submenu:hover .menu-submenu-panel {
+  display: block;
+}
 .menu-dropdown-create {
   min-width: 186px;
   padding: 6px 0;
@@ -1593,6 +1618,35 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+.sync-conn-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(71, 85, 105, 0.65);
+  color: #cbd5e1;
+  background: rgba(15, 23, 42, 0.35);
+}
+.sync-conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #64748b;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.9);
+}
+.sync-conn-pill.is-connecting .sync-conn-dot {
+  background: #f59e0b;
+}
+.sync-conn-pill.is-connected .sync-conn-dot {
+  background: #22c55e;
+}
+.sync-conn-pill.is-disconnected .sync-conn-dot {
+  background: #ef4444;
+}
+.sync-conn-pill.is-idle .sync-conn-dot {
+  background: #64748b;
 }
 .file-list {
   list-style: none;
