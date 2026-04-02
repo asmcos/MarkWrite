@@ -1983,7 +1983,26 @@ window.addEventListener('DOMContentLoaded', async () => {
   const composeDraftsFilterAllBtn = document.getElementById('compose-drafts-filter-all');
   const composeDraftsFilterBlogBtn = document.getElementById('compose-drafts-filter-blog');
   const composeDraftsFilterBookBtn = document.getElementById('compose-drafts-filter-book');
+  const remoteBlogsOverlay = document.getElementById('remote-blogs-overlay');
+  const remoteBlogsTitleEl = document.getElementById('remote-blogs-title');
+  const remoteBlogsHintEl = document.getElementById('remote-blogs-hint');
+  const remoteBlogsListEl = document.getElementById('remote-blogs-list');
+  const remoteBlogsEmptyEl = document.getElementById('remote-blogs-empty');
+  const remoteBlogsCloseBtn = document.getElementById('remote-blogs-close');
+  const remoteBlogsPrevBtn = document.getElementById('remote-blogs-prev');
+  const remoteBlogsNextBtn = document.getElementById('remote-blogs-next');
+  const remoteBlogsRefreshBtn = document.getElementById('remote-blogs-refresh');
+  const remoteBlogsPageEl = document.getElementById('remote-blogs-page');
   let composeDraftsFilterMode = 'all';
+  const remoteBlogsState = {
+    scope: 'mine',
+    page: 1,
+    pageSize: 20,
+    lastCount: 0,
+    loading: false,
+    serverId: '',
+    serverName: '',
+  };
 
   function closeComposeDraftsModal() {
     if (composeDraftsOverlay) composeDraftsOverlay.style.display = 'none';
@@ -1993,11 +2012,146 @@ window.addEventListener('DOMContentLoaded', async () => {
     const n = typeof ts === 'number' ? ts : 0;
     if (!n) return '';
     try {
-      const d = new Date(n);
+      const ms = n > 1e12 ? n : (n * 1000);
+      const d = new Date(ms);
       return d.toLocaleString();
     } catch (_) {
       return '';
     }
+  }
+
+  function normalizePubkeyHex(s) {
+    const t = String(s || '').trim().toLowerCase();
+    return t.startsWith('0x') ? t.slice(2) : t;
+  }
+
+  function closeRemoteBlogsModal() {
+    if (remoteBlogsOverlay) remoteBlogsOverlay.style.display = 'none';
+  }
+
+  function renderRemoteBlogsRows(rows) {
+    if (!remoteBlogsListEl) return;
+    remoteBlogsListEl.innerHTML = '';
+    const list = Array.isArray(rows) ? rows : [];
+    if (remoteBlogsEmptyEl) remoteBlogsEmptyEl.style.display = list.length ? 'none' : 'block';
+    list.forEach((row) => {
+      const li = document.createElement('li');
+      li.className = 'remote-blogs-item';
+      const title = document.createElement('div');
+      title.className = 'remote-blogs-item-title';
+      title.textContent = (row && row.title && String(row.title).trim()) || '（无标题）';
+      const meta = document.createElement('div');
+      meta.className = 'remote-blogs-item-meta';
+      const ts = formatDraftTime(Number(row && row.createdAt ? row.createdAt : 0));
+      const user = (row && row.user) ? String(row.user).slice(0, 12) : '';
+      meta.innerHTML = `<span>ID: ${(row && row.id) ? String(row.id).slice(0, 12) : '—'}</span><span>用户: ${user || '—'}</span><span>${ts || '—'}</span>`;
+      li.appendChild(title);
+      li.appendChild(meta);
+      const summary = (row && row.summary && String(row.summary).trim()) || '';
+      if (summary) {
+        const p = document.createElement('div');
+        p.className = 'remote-blogs-item-summary';
+        p.textContent = summary;
+        li.appendChild(p);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'remote-blogs-item-actions';
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'remote-blogs-save-btn';
+      saveBtn.textContent = '存到本地草稿';
+      saveBtn.addEventListener('click', async () => {
+        const api = window.markwrite && window.markwrite.api;
+        if (!api || typeof api.composeDraftsSave !== 'function') {
+          showAppAlert('草稿保存接口不可用');
+          return;
+        }
+        const rid = (row && row.id) ? String(row.id).trim() : '';
+        const sid = (remoteBlogsState.serverId || 'server').replace(/[^a-zA-Z0-9_-]+/g, '-');
+        const stableId = rid ? `remote-blog-${sid}-${rid}` : '';
+        const tags = Array.isArray(row && row.tags) ? row.tags.map((x) => String(x || '').trim()).filter(Boolean) : [];
+        let remoteIdToSave = '';
+        if (rid && typeof api.identityGet === 'function') {
+          try {
+            const idRes = await api.identityGet({ serverId: remoteBlogsState.serverId || undefined });
+            const myHex = normalizePubkeyHex(idRes && idRes.pubkeyHex);
+            const rowUserHex = normalizePubkeyHex(row && row.user);
+            if (myHex && rowUserHex && myHex === rowUserHex) remoteIdToSave = rid;
+          } catch (_) {}
+        }
+        const saveRes = await api.composeDraftsSave({
+          id: stableId,
+          mode: 'blog',
+          title: (row && row.title) ? String(row.title) : '',
+          tags,
+          cover: (row && row.cover) ? String(row.cover) : '',
+          extra: (row && (row.extra || row.summary)) ? String(row.extra || row.summary) : '',
+          content: (row && row.content) ? String(row.content) : '',
+          remoteId: remoteIdToSave,
+          assetMap: {},
+        });
+        if (saveRes && saveRes.ok) {
+          showAppAlert('已保存到本地草稿箱');
+        } else {
+          showAppAlert((saveRes && saveRes.error) || '保存草稿失败');
+        }
+      });
+      actions.appendChild(saveBtn);
+      li.appendChild(actions);
+      remoteBlogsListEl.appendChild(li);
+    });
+  }
+
+  async function refreshRemoteBlogsList() {
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.remoteBlogsList !== 'function') {
+      showAppAlert('远程博客接口不可用');
+      return;
+    }
+    if (remoteBlogsState.loading) return;
+    remoteBlogsState.loading = true;
+    try {
+      const offset = (remoteBlogsState.page - 1) * remoteBlogsState.pageSize;
+      if (remoteBlogsPageEl) remoteBlogsPageEl.textContent = `第 ${remoteBlogsState.page} 页`;
+      if (remoteBlogsHintEl) remoteBlogsHintEl.textContent = '正在加载远程博客...';
+      const res = await api.remoteBlogsList({
+        scope: remoteBlogsState.scope,
+        offset,
+        limit: remoteBlogsState.pageSize,
+      });
+      if (!res || !res.ok) {
+        renderRemoteBlogsRows([]);
+        if (remoteBlogsHintEl) remoteBlogsHintEl.textContent = `读取失败：${(res && res.message) || '未知错误'}`;
+        return;
+      }
+      const rows = Array.isArray(res.rows) ? res.rows : [];
+      remoteBlogsState.lastCount = rows.length;
+      remoteBlogsState.serverId = (res && res.serverId) ? String(res.serverId) : '';
+      remoteBlogsState.serverName = (res && res.serverName) ? String(res.serverName) : '';
+      renderRemoteBlogsRows(rows);
+      if (remoteBlogsHintEl) {
+        const who = remoteBlogsState.scope === 'mine' ? '我的博客' : '全部博客';
+        remoteBlogsHintEl.textContent = `${res.serverName || '当前服务器'} · ${who} · 已加载 ${rows.length} 条`;
+      }
+      if (remoteBlogsPrevBtn) remoteBlogsPrevBtn.disabled = remoteBlogsState.page <= 1;
+      if (remoteBlogsNextBtn) remoteBlogsNextBtn.disabled = rows.length < remoteBlogsState.pageSize;
+    } catch (e) {
+      renderRemoteBlogsRows([]);
+      if (remoteBlogsHintEl) remoteBlogsHintEl.textContent = `读取失败：${e && e.message ? e.message : String(e)}`;
+    } finally {
+      remoteBlogsState.loading = false;
+    }
+  }
+
+  async function openRemoteBlogsModal(scope) {
+    remoteBlogsState.scope = scope === 'all' ? 'all' : 'mine';
+    remoteBlogsState.page = 1;
+    if (remoteBlogsTitleEl) {
+      remoteBlogsTitleEl.textContent = remoteBlogsState.scope === 'mine' ? '远程博客 · 我的' : '远程博客 · 全部';
+    }
+    if (!remoteBlogsOverlay) return;
+    remoteBlogsOverlay.style.display = 'flex';
+    await refreshRemoteBlogsList();
   }
 
   async function refreshComposeDraftsList() {
@@ -2158,10 +2312,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     openComposeDraftsModal();
   });
   if (menuContentRemoteBlogMine) menuContentRemoteBlogMine.addEventListener('click', () => {
-    showAppAlert('远程博客（我的）列表下一步接入。');
+    openRemoteBlogsModal('mine');
   });
   if (menuContentRemoteBlogAll) menuContentRemoteBlogAll.addEventListener('click', () => {
-    showAppAlert('远程博客（全部）列表下一步接入。');
+    openRemoteBlogsModal('all');
   });
   if (menuContentRemoteBook) menuContentRemoteBook.addEventListener('click', () => {
     showAppAlert('远程书籍列表下一步接入。');
@@ -2175,6 +2329,25 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (e.target === composeDraftsOverlay) closeComposeDraftsModal();
     });
   }
+  if (remoteBlogsCloseBtn) remoteBlogsCloseBtn.addEventListener('click', () => closeRemoteBlogsModal());
+  if (remoteBlogsOverlay) {
+    remoteBlogsOverlay.addEventListener('click', (e) => {
+      if (e.target === remoteBlogsOverlay) closeRemoteBlogsModal();
+    });
+  }
+  if (remoteBlogsPrevBtn) remoteBlogsPrevBtn.addEventListener('click', () => {
+    if (remoteBlogsState.page <= 1) return;
+    remoteBlogsState.page -= 1;
+    void refreshRemoteBlogsList();
+  });
+  if (remoteBlogsNextBtn) remoteBlogsNextBtn.addEventListener('click', () => {
+    if (remoteBlogsState.lastCount < remoteBlogsState.pageSize) return;
+    remoteBlogsState.page += 1;
+    void refreshRemoteBlogsList();
+  });
+  if (remoteBlogsRefreshBtn) remoteBlogsRefreshBtn.addEventListener('click', () => {
+    void refreshRemoteBlogsList();
+  });
   if (contentComposeClose) contentComposeClose.addEventListener('click', exitContentCompose);
   if (contentComposeCoverUpload && contentComposeCoverFile) {
     contentComposeCoverUpload.addEventListener('click', () => contentComposeCoverFile.click());

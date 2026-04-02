@@ -1833,6 +1833,7 @@ app.whenReady().then(() => {
       const dir = ensureComposeDraftsDir();
       const p = payload && typeof payload === 'object' ? payload : {};
       let id = typeof p.id === 'string' && isSafeDraftId(p.id) ? p.id : randomUUID();
+      const fp = path.join(dir, `${id}.json`);
       const now = Date.now();
       const tags = normalizeComposeTagsInput(p.tags);
       const assetMapRaw = p && typeof p.assetMap === 'object' && p.assetMap ? p.assetMap : {};
@@ -1846,6 +1847,19 @@ app.whenReady().then(() => {
         if (!sha256 || !fileUrl) return;
         assetMap[k] = { sha256, fileUrl };
       });
+      const incomingRemoteId = typeof p.remoteId === 'string' ? p.remoteId.trim() : '';
+      let persistedRemoteId = incomingRemoteId;
+      // 保护规则：已有 remoteId 的草稿，后续保存不能清空/替换成其他 id（避免误创建新远程内容）
+      if (fs.existsSync(fp)) {
+        try {
+          const rawOld = fs.readFileSync(fp, 'utf8');
+          const oldDraft = JSON.parse(rawOld);
+          const oldRemoteId = oldDraft && typeof oldDraft.remoteId === 'string' ? oldDraft.remoteId.trim() : '';
+          if (oldRemoteId) {
+            persistedRemoteId = oldRemoteId;
+          }
+        } catch (_) {}
+      }
       const draft = {
         id,
         mode: p.mode === 'book' ? 'book' : 'blog',
@@ -1854,11 +1868,10 @@ app.whenReady().then(() => {
         cover: String(p.cover != null ? p.cover : ''),
         extra: String(p.extra != null ? p.extra : ''),
         content: typeof p.content === 'string' ? p.content : '',
-        remoteId: typeof p.remoteId === 'string' ? p.remoteId.trim() : '',
+        remoteId: persistedRemoteId,
         assetMap,
         updatedAt: now,
       };
-      const fp = path.join(dir, `${id}.json`);
       fs.writeFileSync(fp, JSON.stringify(draft, null, 2), 'utf8');
       return { ok: true, id };
     } catch (e) {
@@ -1901,6 +1914,103 @@ app.whenReady().then(() => {
       return { ok: false, error: String(e && e.message ? e.message : e) };
     }
   });
+
+ipcMain.handle('remoteBlogs:list', async (_event, payload) => {
+  try {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const scope = p.scope === 'mine' ? 'mine' : 'all';
+    const offset = Math.max(0, Number(p.offset) || 0);
+    const limit = Math.max(1, Math.min(100, Number(p.limit) || 20));
+
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeId = syncCfg.activeId || (servers[0] && servers[0].id) || null;
+    const activeServer = servers.find((s) => s.id === activeId) || servers[0];
+    const esserver = (activeServer && activeServer.esserver) || '';
+    if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+
+    const identity = readIdentityForServer(activeId || 'default');
+    const myPubkey = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    if (scope === 'mine' && !myPubkey) return { ok: false, message: '当前服务器未配置用户密钥' };
+
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    if (!mod || typeof mod.get_blogs !== 'function') {
+      return { ok: false, message: 'esclient 缺少 get_blogs 接口' };
+    }
+
+    const getTagValue = (tags, key) => {
+      if (!Array.isArray(tags)) return '';
+      const t = tags.find((item) => Array.isArray(item) && item[0] === key);
+      return t && t[1] ? String(t[1]) : '';
+    };
+
+    const rows = await new Promise((resolve) => {
+      let done = false;
+      const out = [];
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve(out);
+      }, 12000);
+      try {
+        mod.get_blogs(scope === 'mine' ? myPubkey : null, 0, offset, limit, (message) => {
+          if (done) return;
+          try {
+            if (message === 'EOSE') {
+              done = true;
+              clearTimeout(timer);
+              resolve(out);
+              return;
+            }
+            if (!message || typeof message !== 'object') return;
+            const rawData = message.data;
+            let data = {};
+            if (typeof rawData === 'string') {
+              try { data = JSON.parse(rawData); } catch (_) { data = {}; }
+            } else if (rawData && typeof rawData === 'object') {
+              data = rawData;
+            }
+            const blogId = getTagValue(message.tags, 'd') || message.id || '';
+            out.push({
+              id: blogId,
+              user: message.user || '',
+              title: data && data.title ? String(data.title) : '(无标题)',
+              summary: data && (data.summary || data.extra) ? String(data.summary || data.extra) : '',
+              extra: data && data.extra ? String(data.extra) : '',
+              content: data && data.content ? String(data.content) : '',
+              cover: data && (data.cover || data.coverUrl) ? String(data.cover || data.coverUrl) : '',
+              createdAt: message.created_at || 0,
+              tags: Array.isArray(data && data.tags) ? data.tags : (Array.isArray(data && data.labels) ? data.labels : []),
+            });
+          } catch (_) {}
+        });
+      } catch (_) {
+        done = true;
+        clearTimeout(timer);
+        resolve(out);
+      }
+    });
+
+    return {
+      ok: true,
+      rows: rows.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)),
+      offset,
+      limit,
+      scope,
+      serverId: activeId || '',
+      serverName: (activeServer && activeServer.name) || '',
+    };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
 
   function tryListen(port) {
     if (port > PORT_LAST) {

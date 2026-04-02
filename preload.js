@@ -66,6 +66,7 @@ contextBridge.exposeInMainWorld('markwrite', {
     composeDraftsSave: (payload) => ipcRenderer.invoke('composeDrafts:save', payload),
     composeDraftsLoad: (id) => ipcRenderer.invoke('composeDrafts:load', id),
     composeDraftsDelete: (id) => ipcRenderer.invoke('composeDrafts:delete', id),
+    remoteBlogsList: (payload) => ipcRenderer.invoke('remoteBlogs:list', payload),
     composeUploadAssetsAndFixPaths: (payload) => ipcRenderer.invoke('compose:uploadAssetsAndFixPaths', payload),
     composeCreateContent: (payload) => ipcRenderer.invoke('compose:createContent', payload),
   },

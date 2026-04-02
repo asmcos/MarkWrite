@@ -289,6 +289,25 @@
         <div class="compose-drafts-empty" id="compose-drafts-empty" style="display:none;">暂无草稿</div>
       </div>
     </div>
+    <div class="remote-blogs-overlay" id="remote-blogs-overlay" style="display:none;">
+      <div class="remote-blogs-box">
+        <div class="remote-blogs-header">
+          <span class="remote-blogs-title" id="remote-blogs-title">远程博客</span>
+          <button type="button" class="remote-blogs-close" id="remote-blogs-close" title="关闭">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <p class="remote-blogs-hint" id="remote-blogs-hint">从远程服务器读取博客列表</p>
+        <ul class="remote-blogs-list" id="remote-blogs-list"></ul>
+        <div class="remote-blogs-empty" id="remote-blogs-empty" style="display:none;">暂无远程博客</div>
+        <div class="remote-blogs-footer">
+          <button type="button" class="compose-drafts-filter" id="remote-blogs-prev">上一页</button>
+          <span class="remote-blogs-page" id="remote-blogs-page">第 1 页</span>
+          <button type="button" class="compose-drafts-filter" id="remote-blogs-next">下一页</button>
+          <button type="button" class="compose-drafts-filter" id="remote-blogs-refresh">刷新</button>
+        </div>
+      </div>
+    </div>
     <!-- 设置页：页面内大弹窗 -->
     <div class="settings-overlay" id="settings-overlay" style="display:none;">
       <div class="settings-box">
