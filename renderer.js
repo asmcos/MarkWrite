@@ -3718,12 +3718,35 @@ window.addEventListener('DOMContentLoaded', async () => {
     aiModelSelect.addEventListener('change', function () {
       const preset = AI_MODEL_PRESETS[aiModelSelect.value];
       if (!preset) return;
-      window.markwrite.api.aiConfigGet().then((cfg) => {
-        if (!cfg) cfg = {};
-        if (!cfg.openagent) cfg.openagent = {};
-        cfg.openagent = { ...cfg.openagent, model: preset };
-        return window.markwrite.api.aiConfigSave(cfg);
-      }).catch(() => {});
+      const api = window.markwrite && window.markwrite.api;
+      if (!api || typeof api.aiConfigGet !== 'function' || typeof api.aiConfigSave !== 'function') return;
+      const opt = aiModelSelect.options[aiModelSelect.selectedIndex];
+      const label = (opt && opt.textContent) ? String(opt.textContent).trim() : aiModelSelect.value;
+      setAiStatus(false, '正在切换模型并重新连接…');
+      api.aiConfigGet()
+        .then((cfg) => {
+          if (!cfg) cfg = {};
+          if (!cfg.openagent) cfg.openagent = {};
+          cfg.openagent = { ...cfg.openagent, model: preset };
+          return api.aiConfigSave(cfg);
+        })
+        .then(() => (typeof api.aiHealth === 'function' ? api.aiHealth() : Promise.resolve(null)))
+        .then((r) => {
+          if (r && r.ok) {
+            const name = r.backend === 'openagent' ? 'OpenAgent' : (r.backend || 'AI');
+            const extra = r.selfStarted ? '（已自动启动）' : '';
+            const ver = r.version ? ` ${r.version}` : '';
+            setAiStatus(true, `${name} 已连接 · ${label}${extra}`);
+            appendMessage('system', `已切换模型：${label}。${name} 已重新连接${extra}${ver}。`);
+          } else {
+            setAiStatus(false, (r && r.message) ? r.message : '连接检测失败');
+            appendMessage('system', `模型已保存，但连接检测失败：${(r && r.message) ? r.message : '未知错误'}`);
+          }
+        })
+        .catch((e) => {
+          setAiStatus(false, '切换模型失败');
+          appendMessage('system', `切换模型或重新连接时出错：${e && e.message ? e.message : String(e)}`);
+        });
     });
   }
 
