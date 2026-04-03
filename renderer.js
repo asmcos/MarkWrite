@@ -247,6 +247,44 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
   }
 
+  function serializeComposeDraftState() {
+    const ui = readComposeDraftFromUi();
+    const am = composeState.assetMap && typeof composeState.assetMap === 'object' ? composeState.assetMap : {};
+    return JSON.stringify({
+      mode: composeState.mode || '',
+      title: ui.title,
+      cover: ui.cover,
+      extra: ui.extra,
+      content: ui.content,
+      tags: composeState.tags.slice(),
+      draftFileId: composeState.draftFileId || null,
+      remoteId: composeState.remoteId || '',
+      assetMap: am,
+    });
+  }
+
+  function markEditorBaselineFromCurrent() {
+    if (!editor) return;
+    editorBaseline = {
+      path: currentFilePath,
+      content: editor.getValue(),
+    };
+  }
+
+  function markComposeBaselineFromCurrent() {
+    composeBaselineSerialized = serializeComposeDraftState();
+  }
+
+  function isContentDirty() {
+    if (composeState.mode) {
+      return serializeComposeDraftState() !== composeBaselineSerialized;
+    }
+    if (!editor) return false;
+    const p = currentFilePath || null;
+    const bp = editorBaseline.path || null;
+    return editor.getValue() !== editorBaseline.content || p !== bp;
+  }
+
   function toPublicUploadUrl(webPath) {
     const rel = (webPath || '').trim();
     if (!rel) return '';
@@ -474,6 +512,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const btnWinClose = document.getElementById('window-close');
   let editor = null;
   let currentFilePath = null;
+  let editorBaseline = { path: null, content: '' };
+  let composeBaselineSerialized = '';
   // 若 AI 通过 markwrite_apply_content 回写，则这里会收到 apply-editor-content
   // （目前不再展示“未检测到可替换内容”的提示，因此这里只保留接收逻辑）
 
@@ -634,6 +674,32 @@ window.addEventListener('DOMContentLoaded', async () => {
       confirmText: o.confirmText != null ? o.confirmText : '确定',
       cancelText: o.cancelText != null ? o.cancelText : '取消',
       onDone,
+    });
+  }
+
+  function confirmDiscardIfDirty(onProceed) {
+    if (!isContentDirty()) {
+      onProceed();
+      return;
+    }
+    showAppConfirm(
+      '当前内容尚未保存，确定继续？未保存的更改将丢失。',
+      (ok) => { if (ok) onProceed(); },
+      { title: '未保存', confirmText: '仍要继续', cancelText: '取消' },
+    );
+  }
+
+  function confirmDiscardIfDirtyAsync() {
+    return new Promise((resolve) => {
+      if (!isContentDirty()) {
+        resolve(true);
+        return;
+      }
+      showAppConfirm(
+        '当前内容尚未保存，确定继续？未保存的更改将丢失。',
+        (ok) => { resolve(ok); },
+        { title: '未保存', confirmText: '仍要继续', cancelText: '取消' },
+      );
     });
   }
 
@@ -919,13 +985,19 @@ window.addEventListener('DOMContentLoaded', async () => {
   // ---- 顶部菜单项与原有按钮的行为复用 ----
   function doNewFile() {
     if (!editor) return;
-    editor.setValue('');
-    setFilename(null);
-    editor.focus();
+    confirmDiscardIfDirty(() => {
+      if (composeState.mode) exitContentComposeImpl();
+      editor.setValue('');
+      setFilename(null);
+      markEditorBaselineFromCurrent();
+      editor.focus();
+    });
   }
 
   async function doOpenFileOrWorkspace() {
     if (!window.markwrite || !window.markwrite.api) return;
+    const proceed = await confirmDiscardIfDirtyAsync();
+    if (!proceed) return;
     const result = await window.markwrite.api.openFile();
     if (!result) return;
     // 若选择的是目录，则将该目录作为文件树根；若选择的是文件，则打开文件并将其所在目录作为文件树根
@@ -933,8 +1005,10 @@ window.addEventListener('DOMContentLoaded', async () => {
       setFileRoot(result.directory);
       await loadFileTree();
     } else if (result.filePath && editor) {
+      if (composeState.mode) exitContentComposeImpl();
       editor.setValue(result.content);
       setFilename(result.filePath);
+      markEditorBaselineFromCurrent();
       const dir = result.filePath.replace(/[\\/][^\\/]+$/, '');
       if (dir) {
         setFileRoot(dir);
@@ -948,17 +1022,26 @@ window.addEventListener('DOMContentLoaded', async () => {
     const content = editor.getValue();
     if (currentFilePath) {
       const ok = await window.markwrite.api.saveFile(currentFilePath, content);
-      if (ok) setFilename(currentFilePath);
+      if (ok) {
+        setFilename(currentFilePath);
+        if (!composeState.mode) markEditorBaselineFromCurrent();
+      }
     } else {
       const p = await window.markwrite.api.saveAs(content);
-      if (p) setFilename(p);
+      if (p) {
+        setFilename(p);
+        if (!composeState.mode) markEditorBaselineFromCurrent();
+      }
     }
   }
 
   async function doSaveAs() {
     if (!editor || !window.markwrite || !window.markwrite.api) return;
     const p = await window.markwrite.api.saveAs(editor.getValue());
-    if (p) setFilename(p);
+    if (p) {
+      setFilename(p);
+      if (!composeState.mode) markEditorBaselineFromCurrent();
+    }
   }
 
   applyLayoutState();
@@ -1900,6 +1983,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
 
   function enterContentCompose(mode) {
+    confirmDiscardIfDirty(() => {
+      enterContentComposeImpl(mode);
+    });
+  }
+
+  function enterContentComposeImpl(mode) {
     if (!contentComposePanel || !editor) return;
     if (!composeState.mode) {
       composeState.draft = {
@@ -1924,9 +2013,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     editor.setValue('');
     if (paneEditor) paneEditor.dataset.composeOpen = '1';
     editor.focus();
+    markComposeBaselineFromCurrent();
   }
 
   function exitContentCompose() {
+    confirmDiscardIfDirty(() => {
+      exitContentComposeImpl();
+    });
+  }
+
+  function exitContentComposeImpl() {
     if (!contentComposePanel || !editor) return;
     contentComposePanel.style.display = 'none';
     if (paneEditor) delete paneEditor.dataset.composeOpen;
@@ -1943,9 +2039,12 @@ window.addEventListener('DOMContentLoaded', async () => {
       setFilename(prev.filename || null);
       editor.setValue(prev.value || '');
     }
+    markEditorBaselineFromCurrent();
   }
 
   async function openComposeDraftById(id) {
+    const proceed = await confirmDiscardIfDirtyAsync();
+    if (!proceed) return;
     const api = window.markwrite && window.markwrite.api;
     if (!api || typeof api.composeDraftsLoad !== 'function') {
       showAppAlert('草稿加载接口不可用');
@@ -1972,6 +2071,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
     syncComposeModeUi(mode);
     applyLoadedComposeDraft(d);
+    markComposeBaselineFromCurrent();
     editor.focus();
   }
 
@@ -2506,6 +2606,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       });
       if (res && res.ok && res.id) {
         composeState.draftFileId = res.id;
+        markComposeBaselineFromCurrent();
         showAppAlert('草稿已保存');
       } else {
         showAppAlert((res && res.error) || '保存草稿失败');
@@ -2585,6 +2686,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             assetMap: composeState.assetMap || {},
           });
         }
+        markComposeBaselineFromCurrent();
         console.log('[compose:publish:success]', next, { uploaded: fixed.uploaded || {}, created });
         setComposeUploadProgress(`发布完成：${uploadedCount} 张图片已上传并替换。`);
         showAppAlert(`发布成功${created.id ? `（ID: ${created.id}）` : ''}`);
@@ -2735,10 +2837,17 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (li.classList.contains('is-renaming')) return;
         if (e.target && e.target.tagName === 'INPUT') return;
         if (!window.markwrite || !window.markwrite.api || !editor) return;
+        if (entry.path === currentFilePath && !isContentDirty()) return;
+        if (isContentDirty()) {
+          const proceed = await confirmDiscardIfDirtyAsync();
+          if (!proceed) return;
+        }
+        if (composeState.mode) exitContentComposeImpl();
         const res = await window.markwrite.api.fileRead(entry.path);
         if (res && typeof res.content === 'string') {
           editor.setValue(res.content);
           setFilename(entry.path);
+          markEditorBaselineFromCurrent();
           markFileSelected(entry.path);
         }
       });
@@ -3055,6 +3164,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       wordWrap: 'on',
     });
     setFilename(null);
+    markEditorBaselineFromCurrent();
     setupMdToolbar(editor);
     setupMdPreview(editor);
     // 供 main 进程通过 executeJavaScript 读取当前编辑框内容（Agent 工具 markwrite_get_editor_content）
