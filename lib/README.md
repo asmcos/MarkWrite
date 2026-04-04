@@ -16,7 +16,7 @@ Chat 使用的 AI 后端为**可配置、可插拔**：默认使用 OpenAgent，
 1. **环境变量**（优先）
    - `MARKWRITE_AI_BACKEND`：`openagent` | `openclaw`（默认 `openagent`）
    - `OPENAGENT_PROVIDER`：config.json 中的 provider key（如 `volcengine`、`ollama`）
-   - `OPENAGENT_MODEL`：模型 ID（如 `deepseek-v3.2`）
+   - `OPENAGENT_MODEL`：模型 ID（方舟填接入点 `ep-xxxx` 或模型名如 `deepseek-v3-2-251201`，勿写 `deepseek-v3.2`）
    - 各 provider 的 API Key 等：如 `VOLCENGINE_API_KEY`、`VOLCENGINE_BASE_URL`、`VOLCENGINE_MODEL`（见 OpenAgent 文档）
 
 2. **配置文件**（用户可编辑，由 ai-config 读写）
@@ -27,7 +27,7 @@ Chat 使用的 AI 后端为**可配置、可插拔**：默认使用 OpenAgent，
      "backend": "openagent",
      "openagent": {
        "providerKey": "volcengine",
-       "modelId": "deepseek-v3.2",
+       "modelId": "deepseek-v3-2-251201",
        "configPath": null
      }
    }
@@ -46,9 +46,11 @@ Chat 使用的 AI 后端为**可配置、可插拔**：默认使用 OpenAgent，
 
 当用户**未打开文件**（编辑器显示「未命名」）时，OpenAgent 后端会注册工具 `markwrite_apply_content`：将润色/修改后的全文 POST 到 MarkWrite 的 `/apply-content`。MarkWrite 启动时会把 base URL 写入 `~/.config/markwrite/apply-url`，供该工具读取。
 
-## 使用火山引擎 Ark（CodingPlan / API）
+## 使用火山引擎方舟
 
-在 userData 目录（或 `configPath`）的 `config.json` 中配置 volcengine provider（baseURL、apiKey、models），并在 `.env` 或环境中设置 `VOLCENGINE_API_KEY` 等。详见 `docs/openagent-install.md` 与 OpenAgent 仓库说明。
+- **通用推理（含 DeepSeek）**：`baseURL` 应为 `https://ark.cn-beijing.volces.com/api/v3`（OpenAI 兼容）。
+- **编程专线**（部分代码模型）：`https://ark.cn-beijing.volces.com/api/coding/v3`，与上面不是同一路径；混用会导致模型不存在或鉴权异常。
+- 在 userData（或 `configPath`）的 `config.json` 中配置 `volcengine`，并用 `VOLCENGINE_API_KEY`；`model` 多为控制台「推理接入点」的 **ep-xxxx** ID。
 
 ## 新增后端（如 OpenClaw）
 

@@ -1136,6 +1136,14 @@ body {
   font-weight: 600;
   margin-bottom: 8px;
 }
+/* 外观「浅色 / 深色」由 tailwind.input.css 中 .settings-theme-toggle（@apply Tailwind）生成 */
+.settings-theme-saved-hint {
+  margin: 10px 2px 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #94a3b8;
+  min-height: 1.35em;
+}
 .settings-sync-layout {
   display: grid;
   grid-template-columns: 190px minmax(0, 1fr);

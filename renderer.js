@@ -512,6 +512,37 @@ window.addEventListener('DOMContentLoaded', async () => {
   const btnWinClose = document.getElementById('window-close');
   let editor = null;
   let currentFilePath = null;
+
+  const THEME_STORAGE_KEY = 'markwrite-theme';
+  let themeSavedHintTimer = null;
+  function syncSettingsThemeButtons() {
+    const t = document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    document.querySelectorAll('.settings-theme-btn').forEach((btn) => {
+      const choice = btn.getAttribute('data-theme-choice');
+      if (!choice) return;
+      const on = choice === t;
+      btn.classList.toggle('is-theme-active', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+  function applyMarkwriteTheme(theme) {
+    const t = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem(THEME_STORAGE_KEY, t); } catch (_) {}
+    if (editor && window.monaco && window.monaco.editor && typeof window.monaco.editor.setTheme === 'function') {
+      window.monaco.editor.setTheme(t === 'light' ? 'vs' : 'vs-dark');
+    }
+    syncSettingsThemeButtons();
+    const themeSavedHint = document.getElementById('settings-theme-saved-hint');
+    if (themeSavedHint) {
+      themeSavedHint.textContent = '已保存到本机，下次启动将使用此主题。';
+      if (themeSavedHintTimer) clearTimeout(themeSavedHintTimer);
+      themeSavedHintTimer = setTimeout(() => {
+        themeSavedHint.textContent = '';
+        themeSavedHintTimer = null;
+      }, 3200);
+    }
+  }
   let editorBaseline = { path: null, content: '' };
   let composeBaselineSerialized = '';
   // 若 AI 通过 markwrite_apply_content 回写，则这里会收到 apply-editor-content
@@ -1060,7 +1091,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       toggleExplorer();
     });
   }
-
   // 右侧聊天面板宽度：拖拽分隔线调整（像 VSCode）
   if (splitterChat) {
     let dragging = false;
@@ -1138,6 +1168,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         settingsWorkspaceCurrent.value = r.path || '';
       }).catch(() => {});
     }
+    syncSettingsThemeButtons();
     // 预填 Identity（由 sync 配置加载完成后再执行，避免 serverId 竞态）
   }
 
@@ -1343,6 +1374,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       panel.style.display = t === name ? 'block' : 'none';
     });
     currentSettingsTab = name;
+    syncSettingsThemeButtons();
     if ((name === 'identity-login' || name === 'identity-profile') && window.markwrite?.api?.identityFetchProfile) {
       startCheckProfile();
     }
@@ -1403,6 +1435,13 @@ window.addEventListener('DOMContentLoaded', async () => {
       });
     });
   }
+  document.querySelectorAll('.settings-theme-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const ch = btn.getAttribute('data-theme-choice');
+      if (ch === 'light' || ch === 'dark') applyMarkwriteTheme(ch);
+    });
+  });
+  syncSettingsThemeButtons();
   if (settingsOverlay) {
     settingsOverlay.addEventListener('click', (e) => {
       if (e.target === settingsOverlay) closeSettingsModal();
@@ -3156,7 +3195,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     editor = window.monaco.editor.create(container, {
       value: '# 欢迎使用 MarkWrite\n\n在此编辑 Markdown，使用顶部 **打开 / 保存 / 另存为** 操作文件。\n',
       language: 'markdown',
-      theme: 'vs-dark',
+      theme: document.documentElement.getAttribute('data-theme') === 'light' ? 'vs' : 'vs-dark',
       automaticLayout: true,
       minimap: { enabled: true },
       fontSize: 14,

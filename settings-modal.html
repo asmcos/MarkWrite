@@ -481,6 +481,13 @@
       </button>
     </div>
     <div class="settings-nav-group">
+      <div class="settings-nav-title">外观</div>
+      <button type="button" class="settings-tab" data-tab="appearance">
+        <i class="bi bi-brightness-high settings-tab-icon" aria-hidden="true"></i>
+        <span class="settings-tab-label">主题</span>
+      </button>
+    </div>
+    <div class="settings-nav-group">
       <div class="settings-nav-title">用户</div>
       <button type="button" class="settings-tab" data-tab="identity-login">
         <i class="bi bi-key settings-tab-icon" aria-hidden="true"></i>
@@ -541,6 +548,21 @@
         </div>
       </div>
     </div>
+    <div class="settings-panel" data-tab-panel="appearance" style="display:none;">
+      <div class="settings-section-title">主题</div>
+      <p class="settings-hint" style="margin-bottom:12px;">选择界面配色；切换后立即写入本机存储，下次启动仍会生效。</p>
+      <div class="settings-appearance-theme-row flex flex-wrap items-center gap-4 px-1 pb-1 pt-1.5">
+        <button type="button" class="settings-theme-btn settings-theme-toggle" data-theme-choice="light" aria-pressed="false">
+          <i class="bi bi-brightness-high" aria-hidden="true"></i>
+          浅色
+        </button>
+        <button type="button" class="settings-theme-btn settings-theme-toggle" data-theme-choice="dark" aria-pressed="false">
+          <i class="bi bi-moon-stars-fill" aria-hidden="true"></i>
+          深色
+        </button>
+      </div>
+      <p class="settings-theme-saved-hint" id="settings-theme-saved-hint" aria-live="polite"></p>
+    </div>
     <div class="settings-panel" data-tab-panel="workspace" style="display:none;">
       <div class="settings-section-title">Workspace（只读显示）</div>
       <div class="settings-field">
@@ -578,7 +600,7 @@
           <input id="settings-identity-email" class="!h-9 !w-full !rounded-lg !border-slate-600/70 !bg-slate-950/70 !px-3 !text-slate-100 placeholder:!text-slate-500" type="email" placeholder="请输入邮箱，例如 you@example.com" autocomplete="off" />
         </div>
   
-        <div class="settings-field mt-4 rounded-xl border border-slate-700/60 bg-slate-900/35 px-3 py-3">
+        <div class="settings-field mt-4 rounded-xl border border-slate-700/60 bg-slate-900/35 px-3 py-3" id="settings-identity-esec-wrap">
           <label class="mb-1.5 block text-xs font-medium text-slate-300">ESEC 密钥（仅保存在本地，不上传服务器）</label>
           <div class="settings-identity-priv-row">
             <textarea id="settings-identity-privkey" class="!min-h-[92px] !w-full !rounded-lg !border-slate-600/70 !bg-slate-950/70 !px-3 !py-2 !text-slate-100 placeholder:!text-slate-500" rows="3" placeholder="粘贴或导入 ESEC 密钥，例如 esec1..."></textarea>
