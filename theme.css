@@ -239,6 +239,8 @@ html[data-theme="light"] .md-toolbar {
   border-color: var(--mw-border) !important;
   border-bottom: none;
   box-shadow: inset 0 -1px 0 var(--mw-border);
+  padding-top: 14px;
+  padding-bottom: 10px;
 }
 html[data-theme="light"] .md-toolbar-btn {
   color: var(--mw-text-secondary);
@@ -252,10 +254,16 @@ html[data-theme="light"] .md-toolbar-sep {
 }
 html[data-theme="light"] .md-editor-column {
   background: var(--mw-surface-muted);
+  /* 与 pane 标题区拉开一点，避免整块贴顶 */
+  padding-top: 4px;
+  box-sizing: border-box;
 }
 html[data-theme="light"] #monaco-container {
   background: var(--mw-surface-muted);
   border-color: var(--mw-border);
+  /* 与工具栏之间留缝，编辑区不贴 toolbar */
+  padding-top: 4px;
+  box-sizing: border-box;
 }
 
 html[data-theme="light"] .editor-with-preview:not(.preview-closed) .md-preview-wrap,
@@ -516,6 +524,20 @@ html[data-theme="light"] .content-compose-tag-remove {
 html[data-theme="light"] .content-compose-mini-btn {
   border-color: rgba(148, 163, 184, 0.45);
   background: #ffffff;
+  color: var(--mw-text-secondary);
+}
+html[data-theme="light"] .content-compose-coauthor-row {
+  border-color: var(--mw-input-border);
+  background: #f8fafc;
+  color: var(--mw-text);
+}
+html[data-theme="light"] .content-compose-coauthor-input {
+  border-color: var(--mw-input-border);
+  background: #ffffff;
+  color: var(--mw-text);
+}
+html[data-theme="light"] .content-compose-coauthors-show-btn {
+  border-color: var(--mw-input-border);
   color: var(--mw-text-secondary);
 }
 html[data-theme="light"] .content-compose-cover-preview {

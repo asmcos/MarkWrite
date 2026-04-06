@@ -1502,6 +1502,13 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
     };
     bookData.author = normalized.author;
     if (remoteId) bookData.bookId = remoteId;
+    const coAuthorsPayload = Array.isArray(p.coAuthors) ? p.coAuthors : [];
+    const coAuthorPubkeys = coAuthorsPayload
+      .map((x) => (x && typeof x.pubkey === 'string' ? x.pubkey.trim() : ''))
+      .filter(Boolean);
+    if (mode === 'book' && coAuthorPubkeys.length) {
+      bookData.coAuthors = coAuthorPubkeys;
+    }
 
     syncEventstoreVendorConfig();
     const mod = loadEsclient();
@@ -1624,6 +1631,93 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
     console.error('[compose-publish][fatal]', e);
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
+});
+
+/** 与 eventstoreUI editbook 一致：按邮箱或公钥查询用户，用于联合作者 */
+ipcMain.handle('eventstore:lookupUser', async (_event, payload) => {
+  const raw = String(payload && payload.value != null ? payload.value : '').trim();
+  if (!raw) return { ok: false, message: '请输入邮箱或公钥' };
+  const sc = readSyncConfigSafe();
+  const servers = sc.servers || [];
+  const active = servers.find((s) => s.id === sc.activeId) || servers[0];
+  const esserver = active && typeof active.esserver === 'string' ? active.esserver.trim() : '';
+  if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+
+  if (!eventstoreKeyLib) {
+    try {
+      // eslint-disable-next-line global-require, import/no-extraneous-dependencies
+      eventstoreKeyLib = require('eventstore-tools/src/key');
+    } catch (_) {
+      return { ok: false, message: '无法加载密钥库' };
+    }
+  }
+
+  syncEventstoreVendorConfig();
+  const mod = loadEsclient();
+  if (!mod || typeof mod.get_user_by_email !== 'function') {
+    return { ok: false, message: 'EventStore 客户端不可用' };
+  }
+
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  return await new Promise((resolve) => {
+    let settled = false;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      resolve(r);
+    };
+    const timer = setTimeout(() => finish({ ok: false, message: '查询超时（15s）' }), 15000);
+
+    const onMsg = (m) => {
+      if (settled) return;
+      if (m === 'EOSE') {
+        clearTimeout(timer);
+        finish({ ok: false, message: '未找到用户' });
+        return;
+      }
+      if (m && typeof m === 'object' && m.pubkey) {
+        const pubkey = String(m.pubkey).trim();
+        const email =
+          typeof m.email === 'string' && m.email.trim() ? m.email.trim() : '';
+        const label =
+          email || `${pubkey.slice(0, 8)}…${pubkey.slice(-6)}`;
+        clearTimeout(timer);
+        finish({ ok: true, email: label, pubkey });
+      }
+    };
+
+    if (emailRe.test(raw)) {
+      mod.get_user_by_email(raw, onMsg);
+      return;
+    }
+
+    let pkHex = '';
+    if (/^[0-9a-fA-F]{64}$/.test(raw)) {
+      pkHex = raw.toLowerCase();
+    } else if (raw.startsWith('epub1') && typeof eventstoreKeyLib.epubDecode === 'function') {
+      try {
+        const decoded = eventstoreKeyLib.epubDecode(raw);
+        let hex = typeof decoded === 'string' ? decoded : '';
+        if (!hex && decoded && decoded.data) {
+          const d = decoded.data;
+          hex = secretBytesToHex(d instanceof Uint8Array ? d : Buffer.from(d));
+        }
+        if (hex && /^[0-9a-fA-F]{64}$/i.test(hex)) pkHex = hex.toLowerCase();
+      } catch (_) {
+        clearTimeout(timer);
+        finish({ ok: false, message: '公钥格式无效' });
+        return;
+      }
+    }
+
+    if (!pkHex || pkHex.length !== 64) {
+      clearTimeout(timer);
+      finish({ ok: false, message: '请输入有效邮箱，或 64 位 hex 公钥 / epub1 公钥' });
+      return;
+    }
+    mod.get_user_by_pubkeys([pkHex], onMsg);
+  });
 });
 
 // 切换 DevTools：供前端自定义菜单调用
@@ -1871,6 +1965,16 @@ app.whenReady().then(() => {
           }
         } catch (_) {}
       }
+      const coAuthorsRaw = p && p.coAuthors;
+      let coAuthors = [];
+      if (Array.isArray(coAuthorsRaw)) {
+        coAuthors = coAuthorsRaw
+          .filter((x) => x && typeof x === 'object' && typeof x.pubkey === 'string' && x.pubkey.trim())
+          .map((x) => ({
+            email: typeof x.email === 'string' ? x.email.slice(0, 320) : '',
+            pubkey: String(x.pubkey).trim().slice(0, 128),
+          }));
+      }
       const draft = {
         id,
         mode: p.mode === 'book' ? 'book' : 'blog',
@@ -1879,6 +1983,7 @@ app.whenReady().then(() => {
         cover: String(p.cover != null ? p.cover : ''),
         extra: String(p.extra != null ? p.extra : ''),
         author: String(p.author != null ? p.author : '').slice(0, 200),
+        coAuthors,
         outline: String(p.outline != null ? p.outline : ''),
         content: typeof p.content === 'string' ? p.content : '',
         remoteId: persistedRemoteId,
@@ -1899,6 +2004,15 @@ app.whenReady().then(() => {
       if (!fs.existsSync(fp)) return { ok: false, error: '草稿不存在' };
       const raw = fs.readFileSync(fp, 'utf8');
       const j = JSON.parse(raw);
+      let coAuthorsLoad = [];
+      if (Array.isArray(j.coAuthors)) {
+        coAuthorsLoad = j.coAuthors
+          .filter((x) => x && typeof x === 'object' && typeof x.pubkey === 'string')
+          .map((x) => ({
+            email: typeof x.email === 'string' ? x.email : '',
+            pubkey: String(x.pubkey).trim(),
+          }));
+      }
       const draft = {
         id,
         mode: j.mode === 'book' ? 'book' : 'blog',
@@ -1907,6 +2021,7 @@ app.whenReady().then(() => {
         cover: typeof j.cover === 'string' ? j.cover : '',
         extra: typeof j.extra === 'string' ? j.extra : '',
         author: typeof j.author === 'string' ? j.author : '',
+        coAuthors: coAuthorsLoad,
         outline: typeof j.outline === 'string' ? j.outline : '',
         content: typeof j.content === 'string' ? j.content : '',
         remoteId: typeof j.remoteId === 'string' ? j.remoteId : '',

@@ -630,6 +630,92 @@ body {
 .content-compose-meta-tools {
   display: contents;
 }
+/* 书籍：显示作者与联合作者；博客：隐藏 */
+.content-compose-panel[data-compose-mode='blog'] #content-compose-author-wrap,
+.content-compose-panel[data-compose-mode='blog'] #content-compose-coauthors-wrap {
+  display: none !important;
+}
+.content-compose-panel[data-compose-mode='book'] #content-compose-author-wrap,
+.content-compose-panel[data-compose-mode='book'] #content-compose-coauthors-wrap {
+  display: grid;
+}
+.content-compose-coauthors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.content-compose-coauthor-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  background: rgba(15, 23, 42, 0.45);
+  font-size: 12px;
+  color: #e2e8f0;
+}
+.content-compose-coauthor-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.content-compose-coauthor-remove {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.content-compose-coauthor-remove:hover {
+  color: #fca5a5;
+  background: rgba(127, 29, 29, 0.2);
+}
+.content-compose-coauthors-input-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.content-compose-coauthor-input {
+  flex: 1;
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(71, 85, 105, 0.55);
+  background: rgba(2, 6, 23, 0.55);
+  color: #e2e8f0;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.content-compose-coauthors-show-btn {
+  width: 100%;
+  text-align: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 2px dashed rgba(71, 85, 105, 0.55);
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-sizing: border-box;
+}
+.content-compose-coauthors-show-btn:hover {
+  border-color: rgba(99, 102, 241, 0.55);
+  color: #c7d2fe;
+  background: rgba(79, 70, 229, 0.08);
+}
 .content-compose-required-mark {
   color: #f87171;
   font-weight: 600;

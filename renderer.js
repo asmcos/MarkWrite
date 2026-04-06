@@ -40,6 +40,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     mode: null,
     draft: null,
     tags: [],
+    /** 书籍联合作者：{ email, pubkey }，与 eventstoreUI create_book.coAuthors 一致（发布时传 pubkey 数组） */
+    coAuthors: [],
     draftFileId: null,
     remoteId: '',
     assetMap: {},
@@ -185,6 +187,83 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (hidden) hidden.value = composeState.tags.join(', ');
   }
 
+  function toggleComposeCoAuthorInput(show) {
+    const row = document.getElementById('content-compose-coauthors-input-row');
+    const btn = document.getElementById('content-compose-coauthor-show');
+    if (row) row.style.display = show ? 'flex' : 'none';
+    if (btn) btn.style.display = show ? 'none' : 'inline-flex';
+    if (show) {
+      const inp = document.getElementById('content-compose-coauthor-input');
+      if (inp) setTimeout(() => inp.focus(), 50);
+    }
+  }
+
+  async function tryAddComposeCoAuthor() {
+    const input = document.getElementById('content-compose-coauthor-input');
+    const v = input && String(input.value || '').trim();
+    if (!v) return;
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.eventstoreLookupUser !== 'function') {
+      showAppAlert('联合作者查询需要桌面版并已配置 Sync 服务器');
+      return;
+    }
+    let res;
+    try {
+      res = await api.eventstoreLookupUser({ value: v });
+    } catch (e) {
+      showAppAlert(`查询失败：${e && e.message ? e.message : String(e)}`);
+      return;
+    }
+    if (!res || !res.ok) {
+      showAppAlert((res && res.message) || '未找到用户');
+      return;
+    }
+    const pk = res.pubkey ? String(res.pubkey).trim() : '';
+    if (!pk) {
+      showAppAlert('未返回公钥');
+      return;
+    }
+    if (composeState.coAuthors.some((a) => a.pubkey === pk)) {
+      showAppAlert('该联合作者已存在');
+      if (input) input.value = '';
+      return;
+    }
+    composeState.coAuthors.push({
+      email: res.email ? String(res.email) : '',
+      pubkey: pk,
+    });
+    if (input) input.value = '';
+    renderComposeCoAuthors();
+    toggleComposeCoAuthorInput(false);
+  }
+
+  function renderComposeCoAuthors() {
+    const list = document.getElementById('content-compose-coauthors-list');
+    if (!list) return;
+    list.innerHTML = '';
+    composeState.coAuthors.forEach((co, i) => {
+      const row = document.createElement('div');
+      row.className = 'content-compose-coauthor-row';
+      const label = document.createElement('span');
+      label.className = 'content-compose-coauthor-label';
+      const display = (co && co.email) ? String(co.email) : (co && co.pubkey ? String(co.pubkey).slice(0, 10) + '…' : '');
+      label.textContent = display;
+      label.title = (co && co.pubkey) ? String(co.pubkey) : '';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'content-compose-coauthor-remove';
+      btn.setAttribute('aria-label', '移除联合作者');
+      btn.innerHTML = '<i class="bi bi-x-lg"></i>';
+      btn.addEventListener('click', () => {
+        composeState.coAuthors = composeState.coAuthors.filter((_, j) => j !== i);
+        renderComposeCoAuthors();
+      });
+      row.appendChild(label);
+      row.appendChild(btn);
+      list.appendChild(row);
+    });
+  }
+
   function addComposeTagFromInput() {
     const input = document.getElementById('content-compose-tag-input');
     const v = normalizeComposeTag(input && input.value);
@@ -244,8 +323,14 @@ window.addEventListener('DOMContentLoaded', async () => {
       title: (titleEl && titleEl.value.trim()) || '',
       tags: composeState.tags.length ? composeState.tags.join(', ') : '',
       cover: (coverEl && coverEl.value.trim()) || '',
-      extra: (extraEl && extraEl.value.trim()) || '',
+      extra: composeState.mode === 'book' ? '' : ((extraEl && extraEl.value.trim()) || ''),
       author: (authorEl && authorEl.value.trim()) || '',
+      coAuthors: Array.isArray(composeState.coAuthors)
+        ? composeState.coAuthors.map((x) => ({
+            email: typeof x.email === 'string' ? x.email : '',
+            pubkey: typeof x.pubkey === 'string' ? x.pubkey : '',
+          }))
+        : [],
       outline: (outlineEl && outlineEl.value.trim()) || '',
       content: editor ? editor.getValue() : '',
     };
@@ -275,6 +360,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       cover: ui.cover,
       extra: ui.extra,
       author: ui.author || '',
+      coAuthors: Array.isArray(ui.coAuthors) ? ui.coAuthors : [],
       outline: ui.outline || '',
       content: ui.content,
       remoteId: composeState.remoteId || '',
@@ -296,6 +382,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       cover: ui.cover,
       extra: ui.extra,
       author: ui.author || '',
+      coAuthors: Array.isArray(composeState.coAuthors) ? composeState.coAuthors.slice() : [],
       outline: ui.outline || '',
       content: ui.content,
       tags: composeState.tags.slice(),
@@ -483,7 +570,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   const contentComposeTagInput = document.getElementById('content-compose-tag-input');
   const contentComposeTagAdd = document.getElementById('content-compose-tag-add');
   const contentComposeCover = document.getElementById('content-compose-cover');
-  const contentComposeAuthorWrap = document.getElementById('content-compose-author-wrap');
   const contentComposeAuthor = document.getElementById('content-compose-author');
   const contentComposeExtraWrap = document.getElementById('content-compose-extra-wrap');
   const contentComposeExtra = document.getElementById('content-compose-extra');
@@ -2096,7 +2182,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (contentComposeSubtitle && composeState.mode === 'book') {
       contentComposeSubtitle.textContent =
         view === 'info'
-          ? '填写封面、标题、作者、标签与简介；左侧切换到「编辑正文」撰写全书内容。'
+          ? '填写封面、标题、作者与标签；左侧切换到「编辑正文」撰写全书内容。'
           : '撰写全书 Markdown 正文；左侧为大纲树。';
     }
     if (editor && window.monaco) {
@@ -2122,15 +2208,11 @@ window.addEventListener('DOMContentLoaded', async () => {
       clearBookComposeView();
       if (contentComposeTitle) contentComposeTitle.textContent = '创作新博客';
       if (contentComposeSubtitle) contentComposeSubtitle.textContent = '使用下方 Markdown 工具栏与 Monaco 编辑正文';
-      if (contentComposeAuthorWrap) contentComposeAuthorWrap.style.display = 'none';
       if (contentComposeExtraWrap) contentComposeExtraWrap.style.display = 'grid';
       if (contentComposeExtra) contentComposeExtra.placeholder = '博客简介（可选）';
       setFilename('未发布-blog.md');
     } else {
       if (contentComposeTitle) contentComposeTitle.textContent = '创作新书籍';
-      if (contentComposeAuthorWrap) contentComposeAuthorWrap.style.display = 'grid';
-      if (contentComposeExtraWrap) contentComposeExtraWrap.style.display = 'grid';
-      if (contentComposeExtra) contentComposeExtra.placeholder = '书籍简介（可选）';
       setFilename('未发布-book.md');
       syncBookComposeView('info');
     }
@@ -2156,8 +2238,21 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (contentComposeMainTitle) contentComposeMainTitle.value = d.title || '';
     if (contentComposeCover) contentComposeCover.value = d.cover || '';
     renderComposeCoverPreview(d.cover || '');
-    if (contentComposeExtra) contentComposeExtra.value = d.extra || '';
+    if (contentComposeExtra) {
+      contentComposeExtra.value = d.mode === 'book' ? '' : (typeof d.extra === 'string' ? d.extra : '');
+    }
     if (contentComposeAuthor) contentComposeAuthor.value = typeof d.author === 'string' ? d.author : '';
+    if (Array.isArray(d.coAuthors)) {
+      composeState.coAuthors = d.coAuthors
+        .filter((x) => x && typeof x === 'object' && typeof x.pubkey === 'string')
+        .map((x) => ({
+          email: typeof x.email === 'string' ? x.email : '',
+          pubkey: String(x.pubkey).trim(),
+        }));
+    } else {
+      composeState.coAuthors = [];
+    }
+    renderComposeCoAuthors();
     if (d.mode === 'book') {
       const p = ensureBookOutlinePane();
       const B = window.BookOutlinePane;
@@ -2190,6 +2285,11 @@ window.addEventListener('DOMContentLoaded', async () => {
     composeState.draftFileId = null;
     composeState.remoteId = '';
     composeState.assetMap = {};
+    composeState.coAuthors = [];
+    renderComposeCoAuthors();
+    toggleComposeCoAuthorInput(false);
+    const coInp = document.getElementById('content-compose-coauthor-input');
+    if (coInp) coInp.value = '';
     contentComposePanel.style.display = 'block';
     syncComposeModeUi(mode);
     if (contentComposeMainTitle) contentComposeMainTitle.value = '';
@@ -2229,6 +2329,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     const prev = composeState.draft;
     composeState.mode = null;
     composeState.draft = null;
+    composeState.coAuthors = [];
+    renderComposeCoAuthors();
     composeState.draftFileId = null;
     composeState.remoteId = '';
     composeState.assetMap = {};
@@ -2389,6 +2491,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           cover: (row && row.cover) ? String(row.cover) : '',
           extra: (row && (row.extra || row.summary)) ? String(row.extra || row.summary) : '',
           author: '',
+          coAuthors: [],
           outline: '',
           content: (row && row.content) ? String(row.content) : '',
           remoteId: remoteIdToSave,
@@ -2805,6 +2908,34 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (e.key === 'Enter') {
         e.preventDefault();
         addComposeTagFromInput();
+      }
+    });
+  }
+  const contentComposeCoauthorShow = document.getElementById('content-compose-coauthor-show');
+  const contentComposeCoauthorAdd = document.getElementById('content-compose-coauthor-add');
+  const contentComposeCoauthorCancel = document.getElementById('content-compose-coauthor-cancel');
+  const contentComposeCoauthorInput = document.getElementById('content-compose-coauthor-input');
+  if (contentComposeCoauthorShow) {
+    contentComposeCoauthorShow.addEventListener('click', () => toggleComposeCoAuthorInput(true));
+  }
+  if (contentComposeCoauthorCancel) {
+    contentComposeCoauthorCancel.addEventListener('click', () => {
+      if (contentComposeCoauthorInput) contentComposeCoauthorInput.value = '';
+      toggleComposeCoAuthorInput(false);
+    });
+  }
+  if (contentComposeCoauthorAdd) {
+    contentComposeCoauthorAdd.addEventListener('click', () => tryAddComposeCoAuthor());
+  }
+  if (contentComposeCoauthorInput) {
+    contentComposeCoauthorInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        tryAddComposeCoAuthor();
+      }
+      if (e.key === 'Escape') {
+        contentComposeCoauthorInput.value = '';
+        toggleComposeCoAuthorInput(false);
       }
     });
   }

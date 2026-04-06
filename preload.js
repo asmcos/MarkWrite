@@ -69,6 +69,8 @@ contextBridge.exposeInMainWorld('markwrite', {
     remoteBlogsList: (payload) => ipcRenderer.invoke('remoteBlogs:list', payload),
     composeUploadAssetsAndFixPaths: (payload) => ipcRenderer.invoke('compose:uploadAssetsAndFixPaths', payload),
     composeCreateContent: (payload) => ipcRenderer.invoke('compose:createContent', payload),
+    /** 按邮箱或公钥查询 EventStore 用户（联合作者，与 eventstoreUI 一致） */
+    eventstoreLookupUser: (payload) => ipcRenderer.invoke('eventstore:lookupUser', payload),
   },
 });
 

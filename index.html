@@ -120,7 +120,7 @@
                 <i class="bi bi-journal-text"></i>
                 <span class="book-compose-nav-text">
                   <span class="book-compose-nav-title">书籍信息</span>
-                  <span class="book-compose-nav-desc">封面、标题、作者、标签与简介</span>
+                  <span class="book-compose-nav-desc">封面、标题、作者与标签</span>
                 </span>
               </button>
               <button type="button" class="book-compose-nav-item" id="book-compose-nav-editor" data-book-view="editor">
@@ -220,7 +220,7 @@
                   <div class="content-compose-book-banner-text">
                     <div class="content-compose-book-banner-title">创建书籍</div>
                     <p class="content-compose-book-banner-desc" id="content-compose-book-banner-desc">
-                      在左侧切换「编辑正文」可编辑大纲与全书正文；本页填写封面、作者与简介。
+                      在左侧切换「编辑正文」可编辑大纲与全书正文；本页填写封面、作者与标签。
                     </p>
                   </div>
                 </div>
@@ -268,6 +268,36 @@
           </div>
           <div class="content-compose-bottom-tools" id="content-compose-bottom-tools">
             <div id="content-compose-meta-tools" class="content-compose-meta-tools">
+              <div class="content-compose-field" id="content-compose-author-wrap">
+                <label for="content-compose-author">书籍作者<span class="content-compose-required-mark" aria-hidden="true"> *</span></label>
+                <input
+                  type="text"
+                  id="content-compose-author"
+                  placeholder="请输入作者署名"
+                  maxlength="120"
+                  autocomplete="off"
+                  aria-required="true"
+                />
+              </div>
+              <div class="content-compose-field" id="content-compose-coauthors-wrap">
+                <label id="content-compose-coauthors-label">联合作者</label>
+                <div id="content-compose-coauthors-list" class="content-compose-coauthors-list" aria-labelledby="content-compose-coauthors-label"></div>
+                <div id="content-compose-coauthors-input-row" class="content-compose-coauthors-input-row" style="display: none">
+                  <input
+                    type="text"
+                    id="content-compose-coauthor-input"
+                    class="content-compose-coauthor-input"
+                    placeholder="邮箱或公钥（hex / epub1）"
+                    maxlength="500"
+                    autocomplete="off"
+                  />
+                  <button type="button" class="content-compose-mini-btn" id="content-compose-coauthor-add">添加</button>
+                  <button type="button" class="content-compose-mini-btn" id="content-compose-coauthor-cancel">取消</button>
+                </div>
+                <button type="button" class="content-compose-coauthors-show-btn" id="content-compose-coauthor-show">
+                  <i class="bi bi-person-plus" aria-hidden="true"></i> 添加联合作者
+                </button>
+              </div>
               <div class="content-compose-field">
                 <label for="content-compose-tag-input">标签</label>
                 <div class="content-compose-tags-editor">
@@ -285,26 +315,6 @@
                   </div>
                 </div>
                 <input type="hidden" id="content-compose-tags" value="" />
-              </div>
-              <div class="content-compose-field" id="content-compose-author-wrap" style="display: none">
-                <label for="content-compose-author">作者<span class="content-compose-required-mark" aria-hidden="true"> *</span></label>
-                <input
-                  type="text"
-                  id="content-compose-author"
-                  placeholder="请输入作者署名"
-                  maxlength="120"
-                  autocomplete="off"
-                  aria-required="true"
-                />
-              </div>
-              <div class="content-compose-field" id="content-compose-extra-wrap">
-                <label for="content-compose-extra">简介</label>
-                <textarea id="content-compose-extra" rows="4" placeholder="内容简介（可选）"></textarea>
-              </div>
-              <div class="content-compose-generate-actions">
-                <button type="button" class="content-compose-mini-btn" id="content-compose-generate-tags">生成标签</button>
-                <button type="button" class="content-compose-mini-btn" id="content-compose-generate-summary">生成简介</button>
-                <span class="content-compose-generate-status" id="content-compose-generate-status" style="display:none;"></span>
               </div>
             </div>
             <div id="content-compose-actions-footer" class="content-compose-actions-footer">
