@@ -232,12 +232,44 @@ window.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     composeState.coAuthors.push({
-      email: res.email ? String(res.email) : '',
+      email: res.email ? String(res.email).trim() : '',
       pubkey: pk,
     });
     if (input) input.value = '';
     renderComposeCoAuthors();
     toggleComposeCoAuthorInput(false);
+  }
+
+  function composeCoAuthorRowDisplay(co) {
+    const em = co && co.email != null ? String(co.email).trim() : '';
+    if (em) return em;
+    const pk = co && co.pubkey ? String(co.pubkey) : '';
+    if (pk.length > 20) return `${pk.slice(0, 8)}…${pk.slice(-6)}`;
+    return pk || '';
+  }
+
+  async function hydrateComposeCoAuthorEmails() {
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.eventstoreLookupUser !== 'function') return;
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    let changed = false;
+    for (let i = 0; i < composeState.coAuthors.length; i++) {
+      const co = composeState.coAuthors[i];
+      if (!co || !co.pubkey) continue;
+      const em = String(co.email || '').trim();
+      if (em && emailRe.test(em)) continue;
+      try {
+        const res = await api.eventstoreLookupUser({ value: co.pubkey });
+        if (res && res.ok && res.email && String(res.email).trim()) {
+          composeState.coAuthors[i] = {
+            ...co,
+            email: String(res.email).trim(),
+          };
+          changed = true;
+        }
+      } catch (_) {}
+    }
+    if (changed) renderComposeCoAuthors();
   }
 
   function renderComposeCoAuthors() {
@@ -249,7 +281,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       row.className = 'content-compose-coauthor-row';
       const label = document.createElement('span');
       label.className = 'content-compose-coauthor-label';
-      const display = (co && co.email) ? String(co.email) : (co && co.pubkey ? String(co.pubkey).slice(0, 10) + '…' : '');
+      const display = composeCoAuthorRowDisplay(co);
       label.textContent = display;
       label.title = (co && co.pubkey) ? String(co.pubkey) : '';
       const btn = document.createElement('button');
@@ -761,7 +793,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const menuContentDraftsBook = document.getElementById('menu-content-drafts-book');
   const menuContentRemoteBlogMine = document.getElementById('menu-content-remote-blog-mine');
   const menuContentRemoteBlogAll = document.getElementById('menu-content-remote-blog-all');
-  const menuContentRemoteBook = document.getElementById('menu-content-remote-book');
+  const menuContentRemoteBookMine = document.getElementById('menu-content-remote-book-mine');
+  const menuContentRemoteBookAll = document.getElementById('menu-content-remote-book-all');
   const contentComposePanel = document.getElementById('content-compose-panel');
   const contentComposeTitle = document.getElementById('content-compose-title');
   const contentComposeSubtitle = document.getElementById('content-compose-subtitle');
@@ -2677,6 +2710,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (view === 'upload') {
       void refreshBookUploadPanel();
     }
+    if (view === 'info' && composeState.mode === 'book') {
+      void hydrateComposeCoAuthorEmails();
+    }
     if (editor && window.monaco) {
       setTimeout(() => {
         try {
@@ -2745,6 +2781,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       composeState.coAuthors = [];
     }
     renderComposeCoAuthors();
+    void hydrateComposeCoAuthorEmails();
     if (d.mode === 'book') {
       const p = ensureBookOutlinePane();
       const B = window.BookOutlinePane;
@@ -2919,8 +2956,27 @@ window.addEventListener('DOMContentLoaded', async () => {
   const remoteBlogsNextBtn = document.getElementById('remote-blogs-next');
   const remoteBlogsRefreshBtn = document.getElementById('remote-blogs-refresh');
   const remoteBlogsPageEl = document.getElementById('remote-blogs-page');
+  const remoteBooksOverlay = document.getElementById('remote-books-overlay');
+  const remoteBooksTitleEl = document.getElementById('remote-books-title');
+  const remoteBooksHintEl = document.getElementById('remote-books-hint');
+  const remoteBooksListEl = document.getElementById('remote-books-list');
+  const remoteBooksEmptyEl = document.getElementById('remote-books-empty');
+  const remoteBooksCloseBtn = document.getElementById('remote-books-close');
+  const remoteBooksPrevBtn = document.getElementById('remote-books-prev');
+  const remoteBooksNextBtn = document.getElementById('remote-books-next');
+  const remoteBooksRefreshBtn = document.getElementById('remote-books-refresh');
+  const remoteBooksPageEl = document.getElementById('remote-books-page');
   let composeDraftsFilterMode = 'all';
   const remoteBlogsState = {
+    scope: 'mine',
+    page: 1,
+    pageSize: 20,
+    lastCount: 0,
+    loading: false,
+    serverId: '',
+    serverName: '',
+  };
+  const remoteBooksState = {
     scope: 'mine',
     page: 1,
     pageSize: 20,
@@ -2953,6 +3009,14 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   function closeRemoteBlogsModal() {
     if (remoteBlogsOverlay) remoteBlogsOverlay.style.display = 'none';
+  }
+
+  function closeRemoteBooksModal() {
+    if (remoteBooksOverlay) remoteBooksOverlay.style.display = 'none';
+    const dp = document.getElementById('remote-books-download-panel');
+    const dst = document.getElementById('remote-books-download-steps');
+    if (dp) dp.style.display = 'none';
+    if (dst) dst.innerHTML = '';
   }
 
   function renderRemoteBlogsRows(rows) {
@@ -3081,6 +3145,157 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (!remoteBlogsOverlay) return;
     remoteBlogsOverlay.style.display = 'flex';
     await refreshRemoteBlogsList();
+  }
+
+  function renderRemoteBooksRows(rows) {
+    if (!remoteBooksListEl) return;
+    remoteBooksListEl.innerHTML = '';
+    const list = Array.isArray(rows) ? rows : [];
+    if (remoteBooksEmptyEl) remoteBooksEmptyEl.style.display = list.length ? 'none' : 'block';
+    list.forEach((row) => {
+      const li = document.createElement('li');
+      li.className = 'remote-blogs-item';
+      const title = document.createElement('div');
+      title.className = 'remote-blogs-item-title';
+      title.textContent = (row && row.title && String(row.title).trim()) || '（无标题）';
+      const meta = document.createElement('div');
+      meta.className = 'remote-blogs-item-meta';
+      const ts = formatDraftTime(Number(row && row.createdAt ? row.createdAt : 0));
+      const user = (row && row.user) ? String(row.user).slice(0, 12) : '';
+      const author = (row && row.author && String(row.author).trim()) ? String(row.author).slice(0, 24) : '—';
+      const coCount = Array.isArray(row && row.coAuthorPubkeys) ? row.coAuthorPubkeys.length : 0;
+      const coHint = coCount > 0 ? `<span>联合作者: ${coCount} 人</span>` : '';
+      meta.innerHTML = `<span>ID: ${(row && row.id) ? String(row.id).slice(0, 12) : '—'}</span><span>作者: ${author}</span>${coHint}<span>用户: ${user || '—'}</span><span>${ts || '—'}</span>`;
+      li.appendChild(title);
+      li.appendChild(meta);
+      const summary = (row && row.summary && String(row.summary).trim()) || '';
+      if (summary) {
+        const p = document.createElement('div');
+        p.className = 'remote-blogs-item-summary';
+        p.textContent = summary;
+        li.appendChild(p);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'remote-blogs-item-actions';
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'remote-blogs-save-btn';
+      saveBtn.textContent = '存到本地草稿';
+      saveBtn.addEventListener('click', async () => {
+        const api = window.markwrite && window.markwrite.api;
+        if (!api || typeof api.remoteBooksDownloadBook !== 'function') {
+          showAppAlert('完整下载书籍需要桌面版（remoteBooks:downloadBook）');
+          return;
+        }
+        const rid = (row && row.id) ? String(row.id).trim() : '';
+        const sid = (remoteBooksState.serverId || 'server').replace(/[^a-zA-Z0-9_-]+/g, '-');
+        const stableId = rid ? `remote-book-${sid}-${rid}` : '';
+        const authorPk = (row && row.user) ? String(row.user).trim() : '';
+        if (!rid || !authorPk) {
+          showAppAlert('缺少书籍 ID 或作者公钥，无法下载');
+          return;
+        }
+        const panel = document.getElementById('remote-books-download-panel');
+        const ul = document.getElementById('remote-books-download-steps');
+        if (panel) panel.style.display = 'block';
+        if (ul) ul.innerHTML = '';
+        const onProg = (evt) => {
+          if (!ul || !evt) return;
+          const li = document.createElement('li');
+          li.className = `remote-books-download-step${evt.status === 'loading' ? ' is-loading' : ''}`;
+          li.textContent = evt.label || '';
+          ul.appendChild(li);
+          ul.scrollTop = ul.scrollHeight;
+        };
+        if (api.onRemoteBooksDownloadProgress) api.onRemoteBooksDownloadProgress(onProg);
+        saveBtn.disabled = true;
+        try {
+          const res = await api.remoteBooksDownloadBook({
+            bookId: rid,
+            authorPubkey: authorPk,
+            stableId,
+            row: {
+              title: row.title,
+              author: row.author,
+              cover: row.cover,
+              coverImgurl: row.coverImgurl,
+              tags: row.tags,
+              summary: row.summary,
+              extra: row.extra,
+              outline: row.outline,
+              content: row.content,
+              coAuthorPubkeys: row.coAuthorPubkeys,
+              user: row.user,
+            },
+          });
+          if (res && res.ok) {
+            showAppAlert('已保存到本地草稿箱');
+          } else {
+            showAppAlert((res && res.message) || (res && res.error) || '下载或保存失败');
+          }
+        } catch (e) {
+          showAppAlert(`下载失败：${e && e.message ? e.message : String(e)}`);
+        } finally {
+          if (api.onRemoteBooksDownloadProgress) api.onRemoteBooksDownloadProgress(null);
+          saveBtn.disabled = false;
+        }
+      });
+      actions.appendChild(saveBtn);
+      li.appendChild(actions);
+      remoteBooksListEl.appendChild(li);
+    });
+  }
+
+  async function refreshRemoteBooksList() {
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.remoteBooksList !== 'function') {
+      showAppAlert('远程书籍接口不可用');
+      return;
+    }
+    if (remoteBooksState.loading) return;
+    remoteBooksState.loading = true;
+    try {
+      const offset = (remoteBooksState.page - 1) * remoteBooksState.pageSize;
+      if (remoteBooksPageEl) remoteBooksPageEl.textContent = `第 ${remoteBooksState.page} 页`;
+      if (remoteBooksHintEl) remoteBooksHintEl.textContent = '正在加载远程书籍（get_books）…';
+      const res = await api.remoteBooksList({
+        scope: remoteBooksState.scope,
+        offset,
+        limit: remoteBooksState.pageSize,
+      });
+      if (!res || !res.ok) {
+        renderRemoteBooksRows([]);
+        if (remoteBooksHintEl) remoteBooksHintEl.textContent = `读取失败：${(res && res.message) || '未知错误'}`;
+        return;
+      }
+      const rows = Array.isArray(res.rows) ? res.rows : [];
+      remoteBooksState.lastCount = rows.length;
+      remoteBooksState.serverId = (res && res.serverId) ? String(res.serverId) : '';
+      remoteBooksState.serverName = (res && res.serverName) ? String(res.serverName) : '';
+      renderRemoteBooksRows(rows);
+      if (remoteBooksHintEl) {
+        const who = remoteBooksState.scope === 'mine' ? '我的书籍' : '全部书籍';
+        remoteBooksHintEl.textContent = `${res.serverName || '当前服务器'} · ${who} · 已加载 ${rows.length} 条`;
+      }
+      if (remoteBooksPrevBtn) remoteBooksPrevBtn.disabled = remoteBooksState.page <= 1;
+      if (remoteBooksNextBtn) remoteBooksNextBtn.disabled = rows.length < remoteBooksState.pageSize;
+    } catch (e) {
+      renderRemoteBooksRows([]);
+      if (remoteBooksHintEl) remoteBooksHintEl.textContent = `读取失败：${e && e.message ? e.message : String(e)}`;
+    } finally {
+      remoteBooksState.loading = false;
+    }
+  }
+
+  async function openRemoteBooksModal(scope) {
+    remoteBooksState.scope = scope === 'all' ? 'all' : 'mine';
+    remoteBooksState.page = 1;
+    if (remoteBooksTitleEl) {
+      remoteBooksTitleEl.textContent = remoteBooksState.scope === 'mine' ? '远程书籍 · 我的' : '远程书籍 · 全部';
+    }
+    if (!remoteBooksOverlay) return;
+    remoteBooksOverlay.style.display = 'flex';
+    await refreshRemoteBooksList();
   }
 
   async function refreshComposeDraftsList() {
@@ -3262,9 +3477,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (menuContentRemoteBlogAll) menuContentRemoteBlogAll.addEventListener('click', () => {
     openRemoteBlogsModal('all');
   });
-  if (menuContentRemoteBook) menuContentRemoteBook.addEventListener('click', () => {
-    showAppAlert('远程书籍列表下一步接入。');
-  });
+  if (menuContentRemoteBookMine) {
+    menuContentRemoteBookMine.addEventListener('click', () => {
+      void openRemoteBooksModal('mine');
+    });
+  }
+  if (menuContentRemoteBookAll) {
+    menuContentRemoteBookAll.addEventListener('click', () => {
+      void openRemoteBooksModal('all');
+    });
+  }
   if (composeDraftsFilterAllBtn) composeDraftsFilterAllBtn.addEventListener('click', () => setComposeDraftFilter('all'));
   if (composeDraftsFilterBlogBtn) composeDraftsFilterBlogBtn.addEventListener('click', () => setComposeDraftFilter('blog'));
   if (composeDraftsFilterBookBtn) composeDraftsFilterBookBtn.addEventListener('click', () => setComposeDraftFilter('book'));
@@ -3292,6 +3514,25 @@ window.addEventListener('DOMContentLoaded', async () => {
   });
   if (remoteBlogsRefreshBtn) remoteBlogsRefreshBtn.addEventListener('click', () => {
     void refreshRemoteBlogsList();
+  });
+  if (remoteBooksCloseBtn) remoteBooksCloseBtn.addEventListener('click', () => closeRemoteBooksModal());
+  if (remoteBooksOverlay) {
+    remoteBooksOverlay.addEventListener('click', (e) => {
+      if (e.target === remoteBooksOverlay) closeRemoteBooksModal();
+    });
+  }
+  if (remoteBooksPrevBtn) remoteBooksPrevBtn.addEventListener('click', () => {
+    if (remoteBooksState.page <= 1) return;
+    remoteBooksState.page -= 1;
+    void refreshRemoteBooksList();
+  });
+  if (remoteBooksNextBtn) remoteBooksNextBtn.addEventListener('click', () => {
+    if (remoteBooksState.lastCount < remoteBooksState.pageSize) return;
+    remoteBooksState.page += 1;
+    void refreshRemoteBooksList();
+  });
+  if (remoteBooksRefreshBtn) remoteBooksRefreshBtn.addEventListener('click', () => {
+    void refreshRemoteBooksList();
   });
   if (contentComposeClose) contentComposeClose.addEventListener('click', exitContentCompose);
   if (contentComposeCoverPreview && contentComposeCoverFile && contentComposePanel) {

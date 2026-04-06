@@ -43,6 +43,7 @@ const {
   loadEsclient,
 } = require('./lib/eventstore-profile.js');
 const { writeEventstoreConfigFromSync } = require('./lib/write-eventstore-config.js');
+const bookEventstoreMap = require('./lib/book-eventstore-map.js');
 
 /** 将当前 Sync 活跃服务器写入 eventstore-vendor/config.cjs 并清 require 缓存，确保 esclient 连到正确 esserver */
 let lastSyncedEsserver = '';
@@ -1489,26 +1490,16 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       tags: normalized.tags,
     };
     if (remoteId) blogData.blogId = remoteId;
-    const bookData = {
-      title: normalized.title,
-      content: normalized.content,
-      cover: coverFile,
-      coverUrl: coverFile,
-      extra: normalized.extra,
-      summary: normalized.extra,
-      outline: normalized.outline,
-      labels: normalized.tags,
-      tags: normalized.tags,
-    };
-    bookData.author = normalized.author;
-    if (remoteId) bookData.bookId = remoteId;
     const coAuthorsPayload = Array.isArray(p.coAuthors) ? p.coAuthors : [];
     const coAuthorPubkeys = coAuthorsPayload
       .map((x) => (x && typeof x.pubkey === 'string' ? x.pubkey.trim() : ''))
       .filter(Boolean);
-    if (mode === 'book' && coAuthorPubkeys.length) {
-      bookData.coAuthors = coAuthorPubkeys;
-    }
+    const bookData = bookEventstoreMap.buildCreateBookWirePayload({
+      normalized,
+      coverFile,
+      remoteId,
+      coAuthorPubkeys,
+    });
 
     syncEventstoreVendorConfig();
     const mod = loadEsclient();
@@ -1680,10 +1671,10 @@ ipcMain.handle('eventstore:lookupUser', async (_event, payload) => {
         const pubkey = String(m.pubkey).trim();
         const email =
           typeof m.email === 'string' && m.email.trim() ? m.email.trim() : '';
-        const label =
+        const displayLabel =
           email || `${pubkey.slice(0, 8)}…${pubkey.slice(-6)}`;
         clearTimeout(timer);
-        finish({ ok: true, email: label, pubkey });
+        finish({ ok: true, email, displayLabel, pubkey });
       }
     };
 
@@ -1906,6 +1897,89 @@ app.whenReady().then(() => {
       return [];
     }
   }
+  function findChapterTitleInOutlineTree(items, cid) {
+    if (!Array.isArray(items)) return '';
+    for (const it of items) {
+      if (!it || typeof it !== 'object') continue;
+      if (it.type === 'chapter' && it.id === cid) return String(it.title || '').trim();
+      const nested = findChapterTitleInOutlineTree(it.children, cid);
+      if (nested) return nested;
+    }
+    return '';
+  }
+  function fetchChapterTextOnce(mod, bookId, chapterName, authorPubkey, timeoutMs) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve('');
+      }, timeoutMs || 20000);
+      const finish = (s) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(typeof s === 'string' ? s : '');
+      };
+      try {
+        mod.get_chapter_author(bookId, chapterName, authorPubkey, (message) => {
+          if (settled) return;
+          try {
+            if (message === 'EOSE') {
+              finish('');
+              return;
+            }
+            if (!message || typeof message !== 'object') return;
+            const raw = message.data;
+            let s = '';
+            if (typeof raw === 'string') s = raw;
+            else if (raw != null && typeof raw === 'object') s = JSON.stringify(raw);
+            if (s.trim()) finish(s.trim());
+          } catch (_) {
+            finish('');
+          }
+        });
+      } catch (_) {
+        finish('');
+      }
+    });
+  }
+  function fetchBookEventOnce(mod, bookId) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve(null);
+      }, 15000);
+      try {
+        mod.get_book_id(bookId, (message) => {
+          if (settled) return;
+          try {
+            if (message === 'EOSE') {
+              settled = true;
+              clearTimeout(timer);
+              resolve(null);
+              return;
+            }
+            if (message && typeof message === 'object') {
+              settled = true;
+              clearTimeout(timer);
+              resolve(message);
+            }
+          } catch (_) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(null);
+          }
+        });
+      } catch (_) {
+        settled = true;
+        clearTimeout(timer);
+        resolve(null);
+      }
+    });
+  }
   function walkOutlineChapterTitles(items, out) {
     if (!Array.isArray(items)) return;
     items.forEach((it) => {
@@ -2056,7 +2130,7 @@ app.whenReady().then(() => {
       return { ok: false, error: String(e && e.message ? e.message : e), drafts: [] };
     }
   });
-  ipcMain.handle('composeDrafts:save', async (_event, payload) => {
+  async function composeDraftsSaveImpl(payload) {
     try {
       const dir = ensureComposeDraftsDir();
       const p = payload && typeof payload === 'object' ? payload : {};
@@ -2201,7 +2275,8 @@ app.whenReady().then(() => {
     } catch (e) {
       return { ok: false, error: String(e && e.message ? e.message : e) };
     }
-  });
+  }
+  ipcMain.handle('composeDrafts:save', async (_event, payload) => composeDraftsSaveImpl(payload));
   ipcMain.handle('composeDrafts:load', async (_event, id) => {
     try {
       if (!isSafeDraftId(id)) return { ok: false, error: '无效的草稿 id' };
@@ -2544,6 +2619,317 @@ ipcMain.handle('remoteBlogs:list', async (_event, payload) => {
       serverName: (activeServer && activeServer.name) || '',
     };
   } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+ipcMain.handle('remoteBooks:list', async (_event, payload) => {
+  try {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const scope = p.scope === 'mine' ? 'mine' : 'all';
+    const offset = Math.max(0, Number(p.offset) || 0);
+    const limit = Math.max(1, Math.min(100, Number(p.limit) || 20));
+
+    let syncCfg = { servers: [], activeId: null };
+    if (fs.existsSync(SYNC_CONFIG_FILE)) {
+      const raw = fs.readFileSync(SYNC_CONFIG_FILE, 'utf8');
+      syncCfg = JSON.parse(raw);
+    }
+    const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+    const activeId = syncCfg.activeId || (servers[0] && servers[0].id) || null;
+    const activeServer = servers.find((s) => s.id === activeId) || servers[0];
+    const esserver = (activeServer && activeServer.esserver) || '';
+    if (!esserver) return { ok: false, message: '请先在 Sync & Servers 中配置 WebSocket 地址' };
+
+    const identity = readIdentityForServer(activeId || 'default');
+    const myPubkey = (identity.pubkeyHex && String(identity.pubkeyHex).trim())
+      || (identity.pubkey && String(identity.pubkey).trim())
+      || '';
+    if (scope === 'mine' && !myPubkey) return { ok: false, message: '当前服务器未配置用户密钥' };
+
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    if (!mod || typeof mod.get_books !== 'function') {
+      return { ok: false, message: 'esclient 缺少 get_books 接口' };
+    }
+
+    const getTagValue = (tags, key) => {
+      if (!Array.isArray(tags)) return '';
+      const t = tags.find((item) => Array.isArray(item) && item[0] === key);
+      return t && t[1] ? String(t[1]) : '';
+    };
+
+    const outlineToString = (raw) => {
+      if (raw == null || raw === '') return '';
+      if (typeof raw === 'string') return raw;
+      try {
+        return JSON.stringify(raw, null, 2);
+      } catch (_) {
+        return '[]';
+      }
+    };
+
+    const rows = await new Promise((resolve) => {
+      let done = false;
+      const out = [];
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        resolve(out);
+      }, 12000);
+      try {
+        mod.get_books(scope === 'mine' ? myPubkey : null, offset, limit, (message) => {
+          if (done) return;
+          try {
+            if (message === 'EOSE') {
+              done = true;
+              clearTimeout(timer);
+              resolve(out);
+              return;
+            }
+            if (!message || typeof message !== 'object') return;
+            const rawData = message.data;
+            let data = {};
+            if (typeof rawData === 'string') {
+              try { data = JSON.parse(rawData); } catch (_) { data = {}; }
+            } else if (rawData && typeof rawData === 'object') {
+              data = rawData;
+            }
+            const bookId = getTagValue(message.tags, 'd') || message.id || '';
+            const coAuthorPubkeysRemote = Array.isArray(data && data.coAuthors)
+              ? data.coAuthors.map((x) => String(x || '').trim()).filter(Boolean)
+              : [];
+            out.push({
+              id: bookId,
+              user: message.user || '',
+              title: data && data.title ? String(data.title) : '(无标题)',
+              author: data && data.author ? String(data.author) : '',
+              summary: data && (data.summary || data.extra) ? String(data.summary || data.extra) : '',
+              extra: data && data.extra ? String(data.extra) : '',
+              content: data && data.content ? String(data.content) : '',
+              cover: bookEventstoreMap.coverFilenameFromRemoteBookData(data),
+              coverImgurl: data && data.coverImgurl != null ? String(data.coverImgurl).trim() : '',
+              /** 仅 create_book.data 内嵌大纲时的兜底；规范大纲在章节 outline.md，见 remoteBooks:getOutline */
+              outline: outlineToString(data && data.outline),
+              createdAt: message.created_at || 0,
+              tags: bookEventstoreMap.tagsFromRemoteBookData(data),
+              coAuthorPubkeys: coAuthorPubkeysRemote,
+            });
+          } catch (_) {}
+        });
+      } catch (_) {
+        done = true;
+        clearTimeout(timer);
+        resolve(out);
+      }
+    });
+
+    return {
+      ok: true,
+      rows: rows.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)),
+      offset,
+      limit,
+      scope,
+      serverId: activeId || '',
+      serverName: (activeServer && activeServer.name) || '',
+    };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+/** 与 eventstoreUI viewbooks/[bookId]/+page.server.js 一致：大纲 JSON 在章节 outline.md，非 create_book.data.outline */
+ipcMain.handle('remoteBooks:getOutline', async (_event, payload) => {
+  try {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const bookId = String(p.bookId || '').trim();
+    const authorPubkey = String(p.authorPubkey || '').trim();
+    if (!bookId) return { ok: false, message: '缺少 bookId' };
+    if (!authorPubkey) return { ok: false, message: '缺少书籍作者公钥（eventuser）' };
+
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    if (!mod || typeof mod.get_chapter_author !== 'function') {
+      return { ok: false, message: 'esclient 缺少 get_chapter_author' };
+    }
+
+    const outlineName = bookEventstoreMap.OUTLINE_CHAPTER_NAME || 'outline.md';
+
+    const outlineRaw = await fetchChapterTextOnce(mod, bookId, outlineName, authorPubkey, 15000);
+
+    let outline = '[]';
+    if (outlineRaw) {
+      try {
+        const j = JSON.parse(outlineRaw);
+        outline = JSON.stringify(Array.isArray(j) ? j : [], null, 2);
+      } catch (_) {
+        outline = '[]';
+      }
+    }
+
+    return { ok: true, outline, hadRaw: Boolean(outlineRaw && outlineRaw.trim()) };
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
+  }
+});
+
+/** 按 eventstoreUI：get_book_id → outline.md → 各章节 get_chapter_author；进度通过 remoteBooks:downloadProgress 推送 */
+ipcMain.handle('remoteBooks:downloadBook', async (event, payload) => {
+  const send = (data) => {
+    try {
+      if (event.sender && !event.sender.isDestroyed()) {
+        event.sender.send('remoteBooks:downloadProgress', data);
+      }
+    } catch (_) {}
+  };
+  try {
+    const p = payload && typeof payload === 'object' ? payload : {};
+    const bookId = String(p.bookId || '').trim();
+    const authorPubkey = String(p.authorPubkey || '').trim();
+    const row = p.row && typeof p.row === 'object' ? p.row : {};
+    const stableIdRaw = typeof p.stableId === 'string' ? p.stableId.trim() : '';
+    if (!bookId) return { ok: false, message: '缺少 bookId' };
+    if (!authorPubkey) return { ok: false, message: '缺少作者公钥' };
+
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    if (!mod || typeof mod.get_chapter_author !== 'function' || typeof mod.get_book_id !== 'function') {
+      return { ok: false, message: 'esclient 缺少 get_chapter_author / get_book_id' };
+    }
+
+    const outlineChapterName = bookEventstoreMap.OUTLINE_CHAPTER_NAME || 'outline.md';
+
+    let activeServerId = '';
+    try {
+      let syncCfg = { servers: [], activeId: null };
+      if (fs.existsSync(SYNC_CONFIG_FILE)) {
+        syncCfg = JSON.parse(fs.readFileSync(SYNC_CONFIG_FILE, 'utf8'));
+      }
+      const servers = Array.isArray(syncCfg.servers) ? syncCfg.servers : [];
+      activeServerId = syncCfg.activeId || (servers[0] && servers[0].id) || '';
+    } catch (_) {}
+
+    send({ phase: 'book', status: 'loading', label: '正在获取书籍信息…' });
+    const bookMsg = await fetchBookEventOnce(mod, bookId);
+    let data = {};
+    if (bookMsg && bookMsg.data) {
+      const rawData = bookMsg.data;
+      if (typeof rawData === 'string') {
+        try { data = JSON.parse(rawData); } catch (_) { data = {}; }
+      } else if (rawData && typeof rawData === 'object') {
+        data = rawData;
+      }
+    }
+    const title = (data.title != null && String(data.title).trim())
+      ? String(data.title).trim()
+      : (row.title ? String(row.title).trim() : '');
+    const author = (data.author != null && String(data.author).trim())
+      ? String(data.author).trim()
+      : (row.author ? String(row.author).trim() : '');
+    const dataForCover = { ...data };
+    if (!bookEventstoreMap.coverFilenameFromRemoteBookData(dataForCover)) {
+      if (row.coverImgurl) dataForCover.coverImgurl = row.coverImgurl;
+      if (row.cover) dataForCover.cover = row.cover;
+    }
+    const cover = bookEventstoreMap.coverFilenameFromRemoteBookData(dataForCover);
+    const extra = (data.extra != null && String(data.extra).trim())
+      ? String(data.extra).trim()
+      : (row.extra ? String(row.extra).trim() : (row.summary ? String(row.summary).trim() : ''));
+    const tagsMerged = bookEventstoreMap.tagsFromRemoteBookData(data);
+    const tags = tagsMerged.length ? tagsMerged : (Array.isArray(row.tags) ? row.tags.map((x) => String(x || '').trim()).filter(Boolean) : []);
+    let coAuthors = [];
+    if (Array.isArray(row.coAuthorPubkeys) && row.coAuthorPubkeys.length) {
+      coAuthors = row.coAuthorPubkeys.map((pk) => ({
+        email: '',
+        pubkey: String(pk || '').trim(),
+      })).filter((x) => x.pubkey);
+    } else if (Array.isArray(data.coAuthors)) {
+      coAuthors = data.coAuthors.map((pk) => ({
+        email: '',
+        pubkey: String(pk || '').trim(),
+      })).filter((x) => x.pubkey);
+    }
+    send({ phase: 'book', status: 'done', label: '书籍信息' });
+
+    send({ phase: 'outline', status: 'loading', label: '正在获取大纲（outline.md）…' });
+    let outlineRaw = await fetchChapterTextOnce(mod, bookId, outlineChapterName, authorPubkey, 20000);
+    if (!String(outlineRaw || '').trim() && row.outline) {
+      outlineRaw = String(row.outline);
+    }
+    let outlineStr = '[]';
+    if (outlineRaw) {
+      try {
+        const j = JSON.parse(outlineRaw);
+        outlineStr = JSON.stringify(Array.isArray(j) ? j : [], null, 2);
+      } catch (_) {
+        outlineStr = '[]';
+      }
+    }
+    let outlineArr = [];
+    try {
+      outlineArr = JSON.parse(outlineStr);
+    } catch (_) {
+      outlineArr = [];
+    }
+    send({ phase: 'outline', status: 'done', label: '大纲' });
+
+    const chapterIds = parseOutlineForChapterIds(outlineStr);
+    const chapterMap = {};
+    const totalCh = chapterIds.length;
+    for (let i = 0; i < chapterIds.length; i++) {
+      const cid = chapterIds[i];
+      const chapterTitle = findChapterTitleInOutlineTree(Array.isArray(outlineArr) ? outlineArr : [], cid);
+      send({
+        phase: 'chapter',
+        status: 'loading',
+        label: chapterTitle ? `正在下载章节 ${cid}「${chapterTitle}」` : `正在下载章节 ${cid}`,
+        index: i + 1,
+        total: totalCh,
+      });
+      const body = await fetchChapterTextOnce(mod, bookId, String(cid), authorPubkey, 20000);
+      chapterMap[cid] = body != null ? String(body) : '';
+      send({
+        phase: 'chapter',
+        status: 'done',
+        label: chapterTitle ? `已下载：${chapterTitle}` : `已下载章节 ${cid}`,
+        index: i + 1,
+        total: totalCh,
+      });
+    }
+
+    const identity = readIdentityForServer(activeServerId || 'default');
+    const myHex = String(identity.pubkeyHex || identity.pubkey || '').trim().toLowerCase().replace(/^0x/, '');
+    const authorHex = authorPubkey.trim().toLowerCase().replace(/^0x/, '');
+    let remoteIdToSave = '';
+    if (bookId && myHex && authorHex && myHex === authorHex) remoteIdToSave = bookId;
+
+    const contentJoined = joinBookDraftEditorContent(chapterMap, chapterIds);
+    const savePayload = {
+      mode: 'book',
+      title: title || '（无标题）',
+      author: author || '远程',
+      tags,
+      cover,
+      extra,
+      coAuthors,
+      remoteId: remoteIdToSave,
+      outline: outlineStr,
+      chapterContents: chapterMap,
+      content: contentJoined,
+      assetMap: {},
+    };
+    if (stableIdRaw && isSafeDraftId(stableIdRaw)) savePayload.id = stableIdRaw;
+
+    send({ phase: 'save', status: 'loading', label: '正在写入本地草稿…' });
+    const saveRes = await composeDraftsSaveImpl(savePayload);
+    send({
+      phase: 'save',
+      status: saveRes && saveRes.ok ? 'done' : 'error',
+      label: (saveRes && saveRes.ok) ? '已保存到本地草稿箱' : ((saveRes && saveRes.error) || '保存失败'),
+    });
+    return saveRes;
+  } catch (e) {
+    send({ phase: 'error', status: 'error', label: String(e && e.message ? e.message : e) });
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
 });

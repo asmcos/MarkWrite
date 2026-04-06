@@ -889,6 +889,19 @@ html[data-theme="light"] .remote-blogs-footer {
 html[data-theme="light"] .remote-blogs-page {
   color: var(--mw-text-muted);
 }
+html[data-theme="light"] .remote-books-download-panel {
+  border-color: var(--mw-border);
+  background: var(--mw-surface-muted);
+}
+html[data-theme="light"] .remote-books-download-panel-title {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .remote-books-download-step {
+  color: var(--mw-text);
+}
+html[data-theme="light"] .remote-books-download-step.is-loading {
+  color: #b45309;
+}
 
 /* ---- Settings overlay & shell (styles.css) ---- */
 html[data-theme="light"] .settings-overlay {

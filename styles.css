@@ -1353,6 +1353,39 @@ body {
   min-width: 58px;
   text-align: center;
 }
+.remote-books-download-panel {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(71, 85, 105, 0.45);
+  background: rgba(15, 23, 42, 0.5);
+  max-height: 180px;
+  overflow: auto;
+}
+.remote-books-download-panel-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+.remote-books-download-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.remote-books-download-step {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 0;
+}
+.remote-books-download-step.is-loading {
+  color: #fbbf24;
+}
 
 /* 设置页弹窗 */
 .settings-overlay {

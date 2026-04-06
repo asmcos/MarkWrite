@@ -80,7 +80,13 @@
             <div class="menu-dropdown-section-title">书籍</div>
             <button type="button" id="menu-content-new-book">新建书籍</button>
             <button type="button" id="menu-content-drafts-book">书籍草稿箱</button>
-            <button type="button" id="menu-content-remote-book">远程书籍</button>
+            <div class="menu-submenu">
+              <button type="button" class="menu-submenu-trigger">远程书籍 <i class="bi bi-chevron-right"></i></button>
+              <div class="menu-submenu-panel">
+                <button type="button" id="menu-content-remote-book-mine">我的书籍</button>
+                <button type="button" id="menu-content-remote-book-all">全部书籍</button>
+              </div>
+            </div>
             <hr />
             <button type="button" id="menu-settings-open">设置</button>
           </div>
@@ -454,6 +460,29 @@
           <span class="remote-blogs-page" id="remote-blogs-page">第 1 页</span>
           <button type="button" class="compose-drafts-filter" id="remote-blogs-next">下一页</button>
           <button type="button" class="compose-drafts-filter" id="remote-blogs-refresh">刷新</button>
+        </div>
+      </div>
+    </div>
+    <div class="remote-blogs-overlay" id="remote-books-overlay" style="display:none;">
+      <div class="remote-blogs-box">
+        <div class="remote-blogs-header">
+          <span class="remote-blogs-title" id="remote-books-title">远程书籍</span>
+          <button type="button" class="remote-blogs-close" id="remote-books-close" title="关闭">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <p class="remote-blogs-hint" id="remote-books-hint">从远程服务器读取书籍（get_books）</p>
+        <div id="remote-books-download-panel" class="remote-books-download-panel" style="display: none" aria-live="polite">
+          <div class="remote-books-download-panel-title">下载进度</div>
+          <ul id="remote-books-download-steps" class="remote-books-download-steps"></ul>
+        </div>
+        <ul class="remote-blogs-list" id="remote-books-list"></ul>
+        <div class="remote-blogs-empty" id="remote-books-empty" style="display:none;">暂无远程书籍</div>
+        <div class="remote-blogs-footer">
+          <button type="button" class="compose-drafts-filter" id="remote-books-prev">上一页</button>
+          <span class="remote-blogs-page" id="remote-books-page">第 1 页</span>
+          <button type="button" class="compose-drafts-filter" id="remote-books-next">下一页</button>
+          <button type="button" class="compose-drafts-filter" id="remote-books-refresh">刷新</button>
         </div>
       </div>
     </div>

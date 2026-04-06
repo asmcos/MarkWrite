@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 let applyEditorContentCallback = null;
 let workspaceChangedCallback = null;
 let composeUploadProgressCallback = null;
+let remoteBooksDownloadProgressCallback = null;
 ipcRenderer.on('apply-editor-content', (_, content) => {
   if (typeof applyEditorContentCallback === 'function') applyEditorContentCallback(content);
 });
@@ -11,6 +12,9 @@ ipcRenderer.on('workspace:changed', () => {
 });
 ipcRenderer.on('compose:uploadProgress', (_, payload) => {
   if (typeof composeUploadProgressCallback === 'function') composeUploadProgressCallback(payload);
+});
+ipcRenderer.on('remoteBooks:downloadProgress', (_, payload) => {
+  if (typeof remoteBooksDownloadProgressCallback === 'function') remoteBooksDownloadProgressCallback(payload);
 });
 
 contextBridge.exposeInMainWorld('markwrite', {
@@ -25,6 +29,9 @@ contextBridge.exposeInMainWorld('markwrite', {
     },
     onComposeUploadProgress: (callback) => {
       composeUploadProgressCallback = typeof callback === 'function' ? callback : null;
+    },
+    onRemoteBooksDownloadProgress: (callback) => {
+      remoteBooksDownloadProgressCallback = typeof callback === 'function' ? callback : null;
     },
     openFile: () => ipcRenderer.invoke('file:open'),
     fileRead: (filePath) => ipcRenderer.invoke('file:read', filePath),
@@ -67,6 +74,10 @@ contextBridge.exposeInMainWorld('markwrite', {
     composeDraftsLoad: (id) => ipcRenderer.invoke('composeDrafts:load', id),
     composeDraftsDelete: (id) => ipcRenderer.invoke('composeDrafts:delete', id),
     remoteBlogsList: (payload) => ipcRenderer.invoke('remoteBlogs:list', payload),
+    remoteBooksList: (payload) => ipcRenderer.invoke('remoteBooks:list', payload),
+    /** 与 eventstoreUI 一致：get_chapter_author(bookId, 'outline.md', authorPubkey) */
+    remoteBooksGetOutline: (payload) => ipcRenderer.invoke('remoteBooks:getOutline', payload),
+    remoteBooksDownloadBook: (payload) => ipcRenderer.invoke('remoteBooks:downloadBook', payload),
     composeUploadAssetsAndFixPaths: (payload) => ipcRenderer.invoke('compose:uploadAssetsAndFixPaths', payload),
     composeCreateContent: (payload) => ipcRenderer.invoke('compose:createContent', payload),
     composeBookUploadDiff: (payload) => ipcRenderer.invoke('compose:bookUploadDiff', payload),
