@@ -130,12 +130,27 @@
                   <span class="book-compose-nav-desc">Markdown 全书正文</span>
                 </span>
               </button>
+              <button type="button" class="book-compose-nav-item" id="book-compose-nav-upload" data-book-view="upload">
+                <i class="bi bi-cloud-upload"></i>
+                <span class="book-compose-nav-text">
+                  <span class="book-compose-nav-title">上传与同步</span>
+                  <span class="book-compose-nav-desc">分项对比、上传服务器</span>
+                </span>
+              </button>
             </nav>
             <div id="book-compose-outline-section" class="book-compose-outline-section">
               <div class="book-outline-toolbar">
                 <div class="book-outline-toolbar-row book-outline-toolbar-row--full">
                   <button type="button" class="book-outline-tool-btn" id="book-outline-edit-json" title="以 JSON 编辑大纲">
                     <i class="bi bi-code-slash"></i> 编辑大纲
+                  </button>
+                  <button
+                    type="button"
+                    class="book-outline-tool-btn"
+                    id="book-outline-save-draft"
+                    title="将书籍信息、大纲与正文保存到本地草稿箱"
+                  >
+                    <i class="bi bi-save"></i> 保存草稿
                   </button>
                 </div>
                 <div class="book-outline-toolbar-row book-outline-toolbar-row--pair">
@@ -177,9 +192,17 @@
                 <h3 class="content-compose-title" id="content-compose-title">创作内容</h3>
                 <p class="content-compose-subtitle" id="content-compose-subtitle">在下方编辑器中撰写正文</p>
               </div>
-              <button type="button" class="content-compose-close" id="content-compose-close" title="退出创作页">
-                <i class="bi bi-x-lg"></i>
-              </button>
+              <div class="content-compose-head-trailing">
+                <div id="content-compose-head-actions" class="content-compose-head-actions" aria-label="博客草稿与发布">
+                  <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="content-compose-save-draft">
+                    保存草稿
+                  </button>
+                  <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="content-compose-publish">发布</button>
+                </div>
+                <button type="button" class="content-compose-close" id="content-compose-close" title="退出创作页">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </div>
             </div>
             <div id="book-compose-info-block" class="book-compose-info-block">
               <div class="content-compose-grid content-compose-grid--top">
@@ -225,6 +248,28 @@
                   </div>
                 </div>
               </div>
+            </div>
+            <div id="book-compose-upload-block" class="book-compose-upload-block" style="display: none" aria-hidden="true">
+              <p class="book-upload-intro">
+                对比本地文件修改时间与上次成功上传时记录的时间；<strong>待上传</strong>表示该部分自上次上传后有变更。可<strong>勾选分项</strong>后点「上传选中项」，或点「全部上传」；也可在各行点<strong>上传</strong>只发该项。服务器仍为整书
+                <code>create_book</code> / <code>update_book</code>，每次上传都会提交当前合并后的全书内容。
+              </p>
+              <div id="book-upload-legacy-hint" class="book-upload-legacy-hint" style="display: none" role="status"></div>
+              <div class="book-upload-toolbar">
+                <button type="button" class="content-compose-mini-btn" id="book-upload-refresh" title="重新读取本地与同步状态">
+                  <i class="bi bi-arrow-clockwise"></i> 刷新状态
+                </button>
+                <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="book-upload-selected">
+                  上传选中项
+                </button>
+                <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="book-upload-all">全部上传</button>
+              </div>
+              <div id="book-upload-remote-line" class="book-upload-remote-line"></div>
+              <ul id="book-upload-parts-list" class="book-upload-parts-list" aria-label="上传分项"></ul>
+              <p id="book-upload-no-draft" class="book-upload-no-draft" style="display: none">
+                请先点击「保存草稿」生成本地目录草稿后再上传。
+              </p>
+              <div id="book-upload-panel-progress" class="content-compose-upload-progress" style="display: none"></div>
             </div>
           </div>
           <div class="editor-with-preview" id="editor-with-preview" data-preview="closed">
@@ -318,10 +363,6 @@
               </div>
             </div>
             <div id="content-compose-actions-footer" class="content-compose-actions-footer">
-              <div class="content-compose-actions">
-                <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="content-compose-save-draft">保存草稿</button>
-                <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="content-compose-publish">发布</button>
-              </div>
               <div class="content-compose-upload-progress" id="content-compose-upload-progress" style="display:none;"></div>
             </div>
           </div>
@@ -384,7 +425,10 @@
             <i class="bi bi-x-lg"></i>
           </button>
         </div>
-        <p class="compose-drafts-hint">草稿保存在当前工作区的 .markwrite 目录。点击一条草稿即可打开；也可按 Enter。</p>
+        <p class="compose-drafts-hint">
+          草稿保存在当前工作区的 <code>.markwrite/compose-drafts</code>：博客为单文件
+          <code>*.json</code>；书籍为目录 <code>&lt;id&gt;/</code>，含 <code>meta.json</code>、<code>outline.json</code>、<code>chapters/&lt;章节id&gt;.md</code>。点击一条即可打开；也可按 Enter。
+        </p>
         <div class="compose-drafts-filters">
           <button type="button" class="compose-drafts-filter is-active" id="compose-drafts-filter-all">全部</button>
           <button type="button" class="compose-drafts-filter" id="compose-drafts-filter-blog">博客</button>
@@ -465,6 +509,27 @@
         <div class="book-outline-rename-modal-actions">
           <button type="button" class="content-compose-mini-btn book-outline-rename-dismiss">取消</button>
           <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="book-outline-rename-confirm">确定</button>
+        </div>
+      </div>
+    </div>
+    <div
+      id="book-chapter-switch-modal"
+      class="book-chapter-switch-modal book-outline-json-modal"
+      style="display: none"
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="book-chapter-switch-title"
+    >
+      <div class="book-outline-rename-modal-box book-chapter-switch-modal-box">
+        <div class="book-outline-rename-modal-head">
+          <span id="book-chapter-switch-title">切换章节</span>
+        </div>
+        <p class="book-outline-json-hint">当前章节有未保存的修改。请选择：保存到草稿箱后再切换、放弃修改并切换，或留在本章节继续编辑。</p>
+        <div class="book-chapter-switch-actions">
+          <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="book-chapter-switch-save">保存并切换</button>
+          <button type="button" class="content-compose-mini-btn" id="book-chapter-switch-discard">不保存并切换</button>
+          <button type="button" class="content-compose-mini-btn" id="book-chapter-switch-cancel">取消</button>
         </div>
       </div>
     </div>

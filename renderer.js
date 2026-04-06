@@ -45,6 +45,9 @@ window.addEventListener('DOMContentLoaded', async () => {
     draftFileId: null,
     remoteId: '',
     assetMap: {},
+    /** 书籍：各章节正文（内存）；当前编辑章节见 bookActiveChapterId */
+    bookChapterContents: {},
+    bookActiveChapterId: null,
   };
   let activeComposeUploadRequestId = null;
   let composeGenerateStatusTimer = null;
@@ -319,6 +322,15 @@ window.addEventListener('DOMContentLoaded', async () => {
     const extraEl = document.getElementById('content-compose-extra');
     const authorEl = document.getElementById('content-compose-author');
     const outlineEl = document.getElementById('content-compose-outline');
+    const outline = (outlineEl && outlineEl.value.trim()) || '';
+    let content = editor ? editor.getValue() : '';
+    if (composeState.mode === 'book') {
+      const map = { ...composeState.bookChapterContents };
+      const aid = composeState.bookActiveChapterId;
+      if (aid != null && editor) map[aid] = editor.getValue();
+      const ids = collectBookChapterIdsFromOutlineStr(outline);
+      content = mergeBookChaptersPlain(ids, map);
+    }
     return {
       title: (titleEl && titleEl.value.trim()) || '',
       tags: composeState.tags.length ? composeState.tags.join(', ') : '',
@@ -331,9 +343,174 @@ window.addEventListener('DOMContentLoaded', async () => {
             pubkey: typeof x.pubkey === 'string' ? x.pubkey : '',
           }))
         : [],
-      outline: (outlineEl && outlineEl.value.trim()) || '',
-      content: editor ? editor.getValue() : '',
+      outline,
+      content,
     };
+  }
+
+  /** 与主进程书籍草稿一致：编辑器用 <!-- mw-chapter:id --> 分章；发布/上传前去掉标记 */
+  function stripMwChapterMarkers(md) {
+    return String(md || '').replace(/<!--\s*mw-chapter:\d+\s*-->\s*/g, '');
+  }
+
+  function collectBookChapterIdsFromOutlineStr(outlineStr) {
+    try {
+      const j = JSON.parse(String(outlineStr || '').trim() || '[]');
+      const ids = [];
+      function walk(items) {
+        if (!Array.isArray(items)) return;
+        items.forEach((it) => {
+          if (!it || typeof it !== 'object') return;
+          if (it.type === 'chapter' && typeof it.id === 'number') ids.push(it.id);
+          if (Array.isArray(it.children)) walk(it.children);
+        });
+      }
+      walk(Array.isArray(j) ? j : []);
+      return ids;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function splitEditorIntoBookChapterMap(content, outlineStr) {
+    const s = String(content || '');
+    const re = /<!--\s*mw-chapter:(\d+)\s*-->/g;
+    const matches = [];
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      matches.push({ id: Number(m[1]), start: m.index, endAfter: m.index + m[0].length });
+    }
+    const ids = collectBookChapterIdsFromOutlineStr(outlineStr);
+    const map = {};
+    if (matches.length === 0) {
+      if (ids.length) map[ids[0]] = s;
+      ids.slice(1).forEach((id) => { map[id] = ''; });
+      return map;
+    }
+    for (let i = 0; i < matches.length; i++) {
+      const cur = matches[i];
+      const next = matches[i + 1];
+      let body = s.slice(cur.endAfter, next ? next.start : s.length);
+      if (body.startsWith('\n')) body = body.slice(1);
+      map[cur.id] = body;
+    }
+    ids.forEach((id) => {
+      if (map[id] === undefined) map[id] = '';
+    });
+    return map;
+  }
+
+  function mergeBookChaptersPlain(ids, map) {
+    return ids.map((id) => String(map[id] != null ? map[id] : '')).join('\n\n');
+  }
+
+  function buildBookChapterContentsPayload() {
+    const map = { ...composeState.bookChapterContents };
+    const aid = composeState.bookActiveChapterId;
+    if (aid != null && editor) map[aid] = editor.getValue();
+    return map;
+  }
+
+  function walkOutlineChapterIdsForPrune(items, out) {
+    if (!Array.isArray(items)) return;
+    items.forEach((it) => {
+      if (!it || typeof it !== 'object') return;
+      if (it.type === 'chapter' && typeof it.id === 'number') out.push(it.id);
+      if (Array.isArray(it.children)) walkOutlineChapterIdsForPrune(it.children, out);
+    });
+  }
+
+  function pruneBookChapterContentsToOutlineItems(items) {
+    const ids = [];
+    walkOutlineChapterIdsForPrune(Array.isArray(items) ? items : [], ids);
+    const set = new Set(ids);
+    Object.keys(composeState.bookChapterContents).forEach((k) => {
+      const n = Number(k);
+      if (!set.has(n)) delete composeState.bookChapterContents[k];
+    });
+    if (composeState.bookActiveChapterId != null && !set.has(composeState.bookActiveChapterId)) {
+      const first = ids[0];
+      composeState.bookActiveChapterId = first != null ? first : null;
+      if (editor) {
+        editor.setValue(first != null ? String(composeState.bookChapterContents[first] ?? '') : '');
+      }
+      if (bookOutlinePaneInstance && first != null) {
+        bookOutlinePaneInstance.setSelectedChapterId(first);
+      }
+    }
+  }
+
+  let bookChapterSwitchResolver = null;
+  function openBookChapterSwitchConfirm() {
+    return new Promise((resolve) => {
+      bookChapterSwitchResolver = resolve;
+      const el = document.getElementById('book-chapter-switch-modal');
+      if (el) {
+        el.style.display = 'flex';
+        el.setAttribute('aria-hidden', 'false');
+      } else {
+        resolve('cancel');
+      }
+    });
+  }
+  function closeBookChapterSwitchModal(choice) {
+    const el = document.getElementById('book-chapter-switch-modal');
+    if (el) {
+      el.style.display = 'none';
+      el.setAttribute('aria-hidden', 'true');
+    }
+    if (bookChapterSwitchResolver) {
+      bookChapterSwitchResolver(choice);
+      bookChapterSwitchResolver = null;
+    }
+  }
+
+  async function onBeforeBookChapterSelect(nextId, prevId) {
+    if (composeState.mode !== 'book' || !editor) return true;
+    if (prevId == null || prevId === nextId) {
+      composeState.bookActiveChapterId = nextId;
+      editor.setValue(String(composeState.bookChapterContents[nextId] ?? ''));
+      return true;
+    }
+    const cur = editor.getValue();
+    const committed = String(composeState.bookChapterContents[prevId] ?? '');
+    if (cur === committed) {
+      composeState.bookActiveChapterId = nextId;
+      editor.setValue(String(composeState.bookChapterContents[nextId] ?? ''));
+      return true;
+    }
+    const choice = await openBookChapterSwitchConfirm();
+    if (choice === 'cancel') return false;
+    if (choice === 'save') {
+      composeState.bookChapterContents[prevId] = cur;
+      const r = await saveComposeDraftToDisk();
+      if (!r.ok) {
+        showAppAlert(r.error || '保存失败');
+        return false;
+      }
+      markComposeBaselineFromCurrent();
+    }
+    composeState.bookActiveChapterId = nextId;
+    editor.setValue(String(composeState.bookChapterContents[nextId] ?? ''));
+    return true;
+  }
+
+  function onBookOutlineSynced(items) {
+    if (composeState.mode !== 'book') return;
+    pruneBookChapterContentsToOutlineItems(items);
+  }
+
+  function wireBookOutlinePaneIPC() {
+    if (!bookOutlinePaneInstance) return;
+    bookOutlinePaneInstance.onBeforeChapterSelect = onBeforeBookChapterSelect;
+    bookOutlinePaneInstance.onOutlineSynced = onBookOutlineSynced;
+  }
+
+  function initEmptyBookChapterMapFromOutlineStr(outlineStr) {
+    const ids = collectBookChapterIdsFromOutlineStr(outlineStr);
+    const m = {};
+    ids.forEach((id) => { m[id] = ''; });
+    composeState.bookChapterContents = m;
   }
 
   /**
@@ -352,7 +529,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (composeState.mode === 'book' && !String(ui.author || '').trim()) {
       return { ok: false, error: '请先填写作者' };
     }
-    const res = await api.composeDraftsSave({
+    const payload = {
       id: composeState.draftFileId || undefined,
       mode: composeState.mode || 'blog',
       title: ui.title,
@@ -365,9 +542,22 @@ window.addEventListener('DOMContentLoaded', async () => {
       content: ui.content,
       remoteId: composeState.remoteId || '',
       assetMap: composeState.assetMap || {},
-    });
+    };
+    if (composeState.mode === 'book') {
+      const cc = buildBookChapterContentsPayload();
+      const ids = collectBookChapterIdsFromOutlineStr(ui.outline || '');
+      ids.forEach((id) => {
+        if (cc[id] === undefined) cc[id] = '';
+      });
+      payload.chapterContents = cc;
+      payload.content = mergeBookChaptersPlain(ids, cc);
+    }
+    const res = await api.composeDraftsSave(payload);
     if (res && res.ok && res.id) {
       composeState.draftFileId = res.id;
+      if (composeState.mode === 'book') {
+        commitActiveBookChapterFromEditor();
+      }
       return { ok: true, id: res.id };
     }
     return { ok: false, error: (res && res.error) || '保存草稿失败' };
@@ -400,7 +590,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
   }
 
+  /** 书籍：把当前章 Monaco 正文写回 bookChapterContents。切换章节时用 map 与编辑器比较「是否未保存」，保存后必须同步，否则会误判。 */
+  function commitActiveBookChapterFromEditor() {
+    if (composeState.mode !== 'book' || !editor) return;
+    const aid = composeState.bookActiveChapterId;
+    if (aid == null) return;
+    composeState.bookChapterContents[aid] = editor.getValue();
+  }
+
   function markComposeBaselineFromCurrent() {
+    commitActiveBookChapterFromEditor();
     composeBaselineSerialized = serializeComposeDraftState();
   }
 
@@ -608,6 +807,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       renameInput: document.getElementById('book-outline-rename-input'),
       renameConfirm: document.getElementById('book-outline-rename-confirm'),
     });
+    wireBookOutlinePaneIPC();
     return bookOutlinePaneInstance;
   }
   const paneEditor = document.getElementById('pane-editor');
@@ -2164,12 +2364,294 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (pf) pf.removeAttribute('data-book-view');
     const navInfo = document.getElementById('book-compose-nav-info');
     const navEd = document.getElementById('book-compose-nav-editor');
+    const navUp = document.getElementById('book-compose-nav-upload');
     if (navInfo) navInfo.classList.toggle('is-active', false);
     if (navEd) navEd.classList.toggle('is-active', false);
+    if (navUp) navUp.classList.toggle('is-active', false);
+  }
+
+  function setBookUploadPanelProgress(text, kind) {
+    const el = document.getElementById('book-upload-panel-progress');
+    if (!el) return;
+    const msg = String(text || '').trim();
+    if (!msg) {
+      el.textContent = '';
+      el.style.display = 'none';
+      el.classList.remove('is-error');
+      return;
+    }
+    el.style.display = 'block';
+    el.textContent = msg;
+    el.classList.toggle('is-error', kind === 'error');
+  }
+
+  async function refreshBookUploadPanel() {
+    const listEl = document.getElementById('book-upload-parts-list');
+    const legacyEl = document.getElementById('book-upload-legacy-hint');
+    const noDraftEl = document.getElementById('book-upload-no-draft');
+    const remoteEl = document.getElementById('book-upload-remote-line');
+    if (!listEl || composeState.mode !== 'book') return;
+    const api = window.markwrite && window.markwrite.api;
+    if (!composeState.draftFileId) {
+      listEl.innerHTML = '';
+      if (noDraftEl) {
+        noDraftEl.style.display = 'block';
+        noDraftEl.textContent = '请先点击「保存草稿」生成本地目录草稿后再上传。';
+      }
+      if (legacyEl) legacyEl.style.display = 'none';
+      if (remoteEl) remoteEl.textContent = '';
+      return;
+    }
+    if (noDraftEl) noDraftEl.style.display = 'none';
+    if (!api || typeof api.composeBookUploadDiff !== 'function') {
+      listEl.innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'book-upload-part';
+      li.textContent = '上传状态需要桌面版';
+      listEl.appendChild(li);
+      return;
+    }
+    const diff = await api.composeBookUploadDiff({ draftId: composeState.draftFileId });
+    if (!diff.ok) {
+      listEl.innerHTML = '';
+      if (noDraftEl) {
+        noDraftEl.style.display = 'block';
+        noDraftEl.textContent = diff.message || '读取同步状态失败';
+      }
+      return;
+    }
+    if (diff.isLegacyJson) {
+      if (legacyEl) {
+        legacyEl.style.display = 'block';
+        legacyEl.textContent = diff.message || '请先保存为目录草稿';
+      }
+      listEl.innerHTML = '';
+      return;
+    }
+    if (legacyEl) legacyEl.style.display = 'none';
+    if (remoteEl) {
+      if (diff.hasRemoteId) {
+        remoteEl.innerHTML = '';
+        const ic = document.createElement('i');
+        ic.className = 'bi bi-cloud-check';
+        remoteEl.appendChild(ic);
+        remoteEl.appendChild(document.createTextNode(' 已关联远程书籍 ID：'));
+        const code = document.createElement('code');
+        code.textContent = diff.remoteId || '';
+        remoteEl.appendChild(code);
+        remoteEl.appendChild(document.createTextNode('（将使用 update_book）'));
+      } else {
+        remoteEl.innerHTML = '';
+        const ic = document.createElement('i');
+        ic.className = 'bi bi-cloud-slash';
+        remoteEl.appendChild(ic);
+        remoteEl.appendChild(
+          document.createTextNode(' 未有远程 ID，首次发布将 create_book。'),
+        );
+      }
+    }
+    listEl.innerHTML = '';
+    (diff.parts || []).forEach((p) => {
+      const li = document.createElement('li');
+      li.className = `book-upload-part${p.dirty ? ' is-dirty' : ''}`;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'book-upload-part-cb';
+      cb.dataset.partId = p.partId || '';
+      cb.setAttribute('aria-label', `选择 ${p.label}`);
+      cb.checked = true;
+      const badge = document.createElement('span');
+      badge.className = p.dirty ? 'book-upload-badge book-upload-badge--dirty' : 'book-upload-badge book-upload-badge--ok';
+      badge.textContent = p.dirty ? '待上传' : '已同步';
+      const body = document.createElement('div');
+      body.className = 'book-upload-part-body';
+      const title = document.createElement('span');
+      title.className = 'book-upload-part-title';
+      title.textContent = p.label || '';
+      const meta = document.createElement('span');
+      meta.className = 'book-upload-part-meta';
+      const t = p.mtimeMs ? new Date(p.mtimeMs).toLocaleString('zh-CN') : '—';
+      const ts = p.syncedMtimeMs ? new Date(p.syncedMtimeMs).toLocaleString('zh-CN') : '—';
+      meta.textContent = `本地修改：${t} · 上次上传记录：${ts}`;
+      body.appendChild(title);
+      body.appendChild(meta);
+      const upBtn = document.createElement('button');
+      upBtn.type = 'button';
+      upBtn.className = 'book-upload-part-upload';
+      upBtn.textContent = '上传';
+      upBtn.dataset.partId = p.partId || '';
+      upBtn.disabled = !p.dirty;
+      upBtn.title = p.dirty
+        ? '整书发布到服务器（create_book / update_book）'
+        : '该项已与上次上传一致，无需重复上传';
+      upBtn.addEventListener('click', () => {
+        void runComposePublishPipeline({ partId: p.partId });
+      });
+      li.appendChild(cb);
+      li.appendChild(badge);
+      li.appendChild(body);
+      li.appendChild(upBtn);
+      listEl.appendChild(li);
+    });
+  }
+
+  async function runComposePublishPipeline(bookUploadGate) {
+    const api = window.markwrite && window.markwrite.api;
+    if (syncConnState.status !== 'connected') {
+      showAppAlert('当前服务器未连接，请先确认状态栏为“已连接”后再发布。');
+      return { ok: false };
+    }
+    const needBookUploadGate =
+      composeState.mode === 'book'
+      && bookUploadGate != null
+      && (
+        bookUploadGate === 'all'
+        || bookUploadGate === 'selected'
+        || (typeof bookUploadGate === 'object' && bookUploadGate.partId)
+      );
+    if (needBookUploadGate) {
+      if (!composeState.draftFileId) {
+        showAppAlert('请先保存草稿');
+        return { ok: false };
+      }
+      if (!api || typeof api.composeBookUploadDiff !== 'function') {
+        showAppAlert('上传状态不可用（请使用桌面版）');
+        return { ok: false };
+      }
+      const diff = await api.composeBookUploadDiff({ draftId: composeState.draftFileId });
+      if (!diff.ok) {
+        showAppAlert(diff.message || '读取同步状态失败');
+        return { ok: false };
+      }
+      if (diff.isLegacyJson) {
+        showAppAlert(diff.message || '请先将草稿保存为目录草稿');
+        return { ok: false };
+      }
+      if (bookUploadGate === 'all') {
+        if (!(diff.parts || []).some((x) => x.dirty)) {
+          showAppAlert('本地已全部与上次上传记录一致，无需上传');
+          return { ok: false };
+        }
+      } else if (bookUploadGate === 'selected') {
+        const boxes = document.querySelectorAll('#book-upload-parts-list input.book-upload-part-cb');
+        const selected = [...boxes].filter((b) => b.checked);
+        if (!selected.length) {
+          showAppAlert('请勾选要上传的分项');
+          return { ok: false };
+        }
+        const dirtySelected = selected.some((b) => {
+          const pid = b.dataset.partId;
+          const row = (diff.parts || []).find((x) => x.partId === pid);
+          return row && row.dirty;
+        });
+        if (!dirtySelected) {
+          showAppAlert('所选分项均已是最新，无需上传');
+          return { ok: false };
+        }
+      } else if (typeof bookUploadGate === 'object' && bookUploadGate.partId) {
+        const uploadPartGate = String(bookUploadGate.partId);
+        const row = (diff.parts || []).find((x) => x.partId === uploadPartGate);
+        if (!row || !row.dirty) {
+          showAppAlert('该项已是最新，无需上传');
+          return { ok: false };
+        }
+      }
+    }
+    const uiPub = readComposeDraftFromUi();
+    const payload = {
+      mode: composeState.mode || 'blog',
+      ...uiPub,
+      content: composeState.mode === 'book'
+        ? stripMwChapterMarkers(uiPub.content)
+        : uiPub.content,
+    };
+    if (!payload.title) {
+      showAppAlert('请先填写标题');
+      if (contentComposeMainTitle) contentComposeMainTitle.focus();
+      return { ok: false };
+    }
+    if (payload.mode === 'book' && !String(payload.author || '').trim()) {
+      showAppAlert('请先填写作者');
+      if (contentComposeAuthor) contentComposeAuthor.focus();
+      return { ok: false };
+    }
+    if (!api || typeof api.composeUploadAssetsAndFixPaths !== 'function') {
+      showAppAlert('发布前图片上传不可用（请使用桌面版）');
+      return { ok: false };
+    }
+    setComposeUploadProgress('正在保存本地草稿（建立索引）…');
+    setBookUploadPanelProgress('正在保存本地草稿…');
+    const draftFirst = await saveComposeDraftToDisk();
+    if (!draftFirst.ok) {
+      setComposeUploadProgress(`保存草稿失败：${draftFirst.error || '未知错误'}`, 'error');
+      setBookUploadPanelProgress(`保存草稿失败：${draftFirst.error || '未知错误'}`, 'error');
+      showAppAlert(draftFirst.error || '请先成功保存本地草稿后再发布');
+      return { ok: false };
+    }
+    activeComposeUploadRequestId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setComposeUploadProgress('正在扫描并上传图片…');
+    setBookUploadPanelProgress('正在扫描并上传图片…');
+    const fixed = await api.composeUploadAssetsAndFixPaths({
+      requestId: activeComposeUploadRequestId,
+      cover: payload.cover || '',
+      content: payload.content || '',
+      assetMap: composeState.assetMap || {},
+    });
+    if (!fixed || !fixed.ok) {
+      setComposeUploadProgress(`上传失败：${(fixed && fixed.message) || '未知错误'}`, 'error');
+      setBookUploadPanelProgress(`上传失败：${(fixed && fixed.message) || '未知错误'}`, 'error');
+      activeComposeUploadRequestId = null;
+      return { ok: false };
+    }
+    activeComposeUploadRequestId = null;
+    const next = {
+      ...payload,
+      cover: fixed.cover || payload.cover,
+      content: fixed.content || payload.content,
+      remoteId: composeState.remoteId || '',
+    };
+    const uploadedCount = Object.keys(fixed.uploaded || {}).length;
+    if (fixed.assetMap && typeof fixed.assetMap === 'object') {
+      composeState.assetMap = fixed.assetMap;
+    }
+    setComposeUploadProgress(`图片处理完成：${uploadedCount} 张已替换（可复用），正在发布…`);
+    setBookUploadPanelProgress(`图片处理完成，正在发布…`);
+    if (typeof api.composeCreateContent !== 'function') {
+      showAppAlert('创建内容接口不可用');
+      return { ok: false };
+    }
+    const created = await api.composeCreateContent(next);
+    if (!created || !created.ok) {
+      setBookUploadPanelProgress((created && created.message) || '发布失败', 'error');
+      showAppAlert((created && created.message) || '发布失败');
+      return { ok: false };
+    }
+    if (created.id) composeState.remoteId = created.id;
+    const postSave = await saveComposeDraftToDisk();
+    markComposeBaselineFromCurrent();
+    setComposeUploadProgress(`发布完成：${uploadedCount} 张图片已上传并替换。`);
+    setBookUploadPanelProgress('');
+    let doneMsg = `发布成功${created.id ? `（ID: ${created.id}）` : ''}`;
+    if (!postSave.ok) {
+      doneMsg += `；写回本地草稿失败：${postSave.error || ''}`;
+    }
+    showAppAlert(doneMsg);
+    if (
+      composeState.mode === 'book'
+      && composeState.draftFileId
+      && typeof api.composeBookUploadMarkSynced === 'function'
+    ) {
+      const mr = await api.composeBookUploadMarkSynced({ draftId: composeState.draftFileId });
+      if (!mr || !mr.ok) {
+        console.warn('[book-upload-sync]', mr && mr.message);
+      }
+      await refreshBookUploadPanel();
+    }
+    return { ok: true, created };
   }
 
   function syncBookComposeView(view) {
-    if (view !== 'info' && view !== 'editor') return;
+    if (view !== 'info' && view !== 'editor' && view !== 'upload') return;
     bookComposeView = view;
     const pe = document.getElementById('pane-editor');
     const pf = document.getElementById('pane-files');
@@ -2177,13 +2659,23 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (pf) pf.setAttribute('data-book-view', view);
     const navInfo = document.getElementById('book-compose-nav-info');
     const navEd = document.getElementById('book-compose-nav-editor');
+    const navUp = document.getElementById('book-compose-nav-upload');
     if (navInfo) navInfo.classList.toggle('is-active', view === 'info');
     if (navEd) navEd.classList.toggle('is-active', view === 'editor');
+    if (navUp) navUp.classList.toggle('is-active', view === 'upload');
     if (contentComposeSubtitle && composeState.mode === 'book') {
-      contentComposeSubtitle.textContent =
-        view === 'info'
-          ? '填写封面、标题、作者与标签；左侧切换到「编辑正文」撰写全书内容。'
-          : '撰写全书 Markdown 正文；左侧为大纲树。';
+      if (view === 'info') {
+        contentComposeSubtitle.textContent =
+          '填写封面、标题、作者与标签；左侧切换到「编辑正文」撰写全书内容。';
+      } else if (view === 'editor') {
+        contentComposeSubtitle.textContent = '撰写全书 Markdown 正文；左侧为大纲树。';
+      } else {
+        contentComposeSubtitle.textContent =
+          '对比本地与上次上传；可勾选后「上传选中项」、「全部上传」，或各行「上传」。';
+      }
+    }
+    if (view === 'upload') {
+      void refreshBookUploadPanel();
     }
     if (editor && window.monaco) {
       setTimeout(() => {
@@ -2261,10 +2753,27 @@ window.addEventListener('DOMContentLoaded', async () => {
       } else if (contentComposeOutline) {
         contentComposeOutline.value = typeof d.outline === 'string' ? d.outline : '';
       }
-    } else if (contentComposeOutline) {
-      contentComposeOutline.value = typeof d.outline === 'string' ? d.outline : '';
+      const outlineStr = contentComposeOutline ? contentComposeOutline.value.trim() : '';
+      const map = splitEditorIntoBookChapterMap(
+        typeof d.content === 'string' ? d.content : '',
+        outlineStr,
+      );
+      composeState.bookChapterContents = map;
+      const ids = collectBookChapterIdsFromOutlineStr(outlineStr);
+      const firstId = ids.length ? ids[0] : null;
+      composeState.bookActiveChapterId = firstId;
+      if (editor) {
+        editor.setValue(firstId != null ? String(map[firstId] ?? '') : '');
+      }
+      if (p && firstId != null) p.setSelectedChapterId(firstId);
+    } else {
+      composeState.bookChapterContents = {};
+      composeState.bookActiveChapterId = null;
+      if (contentComposeOutline) {
+        contentComposeOutline.value = typeof d.outline === 'string' ? d.outline : '';
+      }
+      if (editor) editor.setValue(typeof d.content === 'string' ? d.content : '');
     }
-    if (editor) editor.setValue(typeof d.content === 'string' ? d.content : '');
   }
 
   function enterContentCompose(mode) {
@@ -2304,13 +2813,24 @@ window.addEventListener('DOMContentLoaded', async () => {
       if (p && B && typeof B.defaultOutline === 'function') {
         p.setOutline(B.defaultOutline());
       } else if (contentComposeOutline) contentComposeOutline.value = '';
-    } else if (contentComposeOutline) {
-      contentComposeOutline.value = '';
+      const outlineStr = contentComposeOutline ? contentComposeOutline.value.trim() : '';
+      initEmptyBookChapterMapFromOutlineStr(outlineStr);
+      const ids = collectBookChapterIdsFromOutlineStr(outlineStr);
+      const firstId = ids.length ? ids[0] : null;
+      composeState.bookActiveChapterId = firstId;
+      if (editor) {
+        editor.setValue(firstId != null ? String(composeState.bookChapterContents[firstId] ?? '') : '');
+      }
+      if (p && firstId != null) p.setSelectedChapterId(firstId);
+    } else {
+      composeState.bookChapterContents = {};
+      composeState.bookActiveChapterId = null;
+      if (contentComposeOutline) contentComposeOutline.value = '';
+      editor.setValue('');
     }
     renderComposeCoverPreview('');
     setComposeUploadProgress('');
     setComposeGenerateStatus('');
-    editor.setValue('');
     if (paneEditor) paneEditor.dataset.composeOpen = '1';
     editor.focus();
     markComposeBaselineFromCurrent();
@@ -2334,6 +2854,8 @@ window.addEventListener('DOMContentLoaded', async () => {
     composeState.draftFileId = null;
     composeState.remoteId = '';
     composeState.assetMap = {};
+    composeState.bookChapterContents = {};
+    composeState.bookActiveChapterId = null;
     activeComposeUploadRequestId = null;
     setComposeUploadProgress('');
     setComposeGenerateStatus('');
@@ -2939,98 +3461,70 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
     });
   }
+  async function handleComposeSaveDraftClick() {
+    const r = await saveComposeDraftToDisk();
+    if (r.ok) {
+      markComposeBaselineFromCurrent();
+      showAppAlert('草稿已保存');
+    } else {
+      showAppAlert(r.error || '保存草稿失败');
+    }
+  }
   if (contentComposeSaveDraft) {
-    contentComposeSaveDraft.addEventListener('click', async () => {
-      const r = await saveComposeDraftToDisk();
-      if (r.ok) {
-        markComposeBaselineFromCurrent();
-        showAppAlert('草稿已保存');
-      } else {
-        showAppAlert(r.error || '保存草稿失败');
-      }
+    contentComposeSaveDraft.addEventListener('click', () => handleComposeSaveDraftClick());
+  }
+  const bookOutlineSaveDraft = document.getElementById('book-outline-save-draft');
+  if (bookOutlineSaveDraft) {
+    bookOutlineSaveDraft.addEventListener('click', () => handleComposeSaveDraftClick());
+  }
+  const bookChapterSwitchModal = document.getElementById('book-chapter-switch-modal');
+  const bookChapterSwitchSave = document.getElementById('book-chapter-switch-save');
+  const bookChapterSwitchDiscard = document.getElementById('book-chapter-switch-discard');
+  const bookChapterSwitchCancel = document.getElementById('book-chapter-switch-cancel');
+  if (bookChapterSwitchSave) bookChapterSwitchSave.addEventListener('click', () => closeBookChapterSwitchModal('save'));
+  if (bookChapterSwitchDiscard) {
+    bookChapterSwitchDiscard.addEventListener('click', () => closeBookChapterSwitchModal('discard'));
+  }
+  if (bookChapterSwitchCancel) bookChapterSwitchCancel.addEventListener('click', () => closeBookChapterSwitchModal('cancel'));
+  if (bookChapterSwitchModal) {
+    bookChapterSwitchModal.addEventListener('click', (e) => {
+      if (e.target === bookChapterSwitchModal) closeBookChapterSwitchModal('cancel');
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      if (bookChapterSwitchModal.style.display !== 'flex') return;
+      closeBookChapterSwitchModal('cancel');
     });
   }
   if (contentComposePublish) {
     contentComposePublish.addEventListener('click', () => {
-      if (syncConnState.status !== 'connected') {
-        showAppAlert('当前服务器未连接，请先确认状态栏为“已连接”后再发布。');
-        return;
-      }
-      const payload = {
-        mode: composeState.mode || 'blog',
-        ...readComposeDraftFromUi(),
-      };
-      if (!payload.title) {
-        showAppAlert('请先填写标题');
-        if (contentComposeMainTitle) contentComposeMainTitle.focus();
-        return;
-      }
-      if (payload.mode === 'book' && !String(payload.author || '').trim()) {
-        showAppAlert('请先填写作者');
-        if (contentComposeAuthor) contentComposeAuthor.focus();
-        return;
-      }
-      (async () => {
-        const api = window.markwrite && window.markwrite.api;
-        if (!api || typeof api.composeUploadAssetsAndFixPaths !== 'function') {
-          console.log('[compose:publish]', payload);
-          showAppAlert('发布前图片上传不可用（请使用桌面版）');
-          return;
-        }
-        setComposeUploadProgress('正在保存本地草稿（建立索引）…');
-        const draftFirst = await saveComposeDraftToDisk();
-        if (!draftFirst.ok) {
-          setComposeUploadProgress(`保存草稿失败：${draftFirst.error || '未知错误'}`, 'error');
-          showAppAlert(draftFirst.error || '请先成功保存本地草稿后再发布');
-          return;
-        }
-        activeComposeUploadRequestId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        setComposeUploadProgress('正在扫描并上传图片…');
-        const fixed = await api.composeUploadAssetsAndFixPaths({
-          requestId: activeComposeUploadRequestId,
-          cover: payload.cover || '',
-          content: payload.content || '',
-          assetMap: composeState.assetMap || {},
-        });
-        if (!fixed || !fixed.ok) {
-          setComposeUploadProgress(`上传失败：${(fixed && fixed.message) || '未知错误'}`, 'error');
-          activeComposeUploadRequestId = null;
-          return;
-        }
-        activeComposeUploadRequestId = null;
-        const next = {
-          ...payload,
-          cover: fixed.cover || payload.cover,
-          content: fixed.content || payload.content,
-          remoteId: composeState.remoteId || '',
-        };
-        const uploadedCount = Object.keys(fixed.uploaded || {}).length;
-        if (fixed.assetMap && typeof fixed.assetMap === 'object') {
-          composeState.assetMap = fixed.assetMap;
-        }
-        setComposeUploadProgress(`图片处理完成：${uploadedCount} 张已替换（可复用），正在发布…`);
-        if (typeof api.composeCreateContent !== 'function') {
-          console.log('[compose:publish]', next, { uploaded: fixed.uploaded || {} });
-          showAppAlert('创建内容接口不可用');
-          return;
-        }
-        const created = await api.composeCreateContent(next);
-        if (!created || !created.ok) {
-          showAppAlert((created && created.message) || '发布失败');
-          return;
-        }
-        if (created.id) composeState.remoteId = created.id;
-        // 写回草稿：记录远端 id + 图片映射（发布前已保存过草稿，此处必有 draftFileId）
-        const postSave = await saveComposeDraftToDisk();
-        markComposeBaselineFromCurrent();
-        console.log('[compose:publish:success]', next, { uploaded: fixed.uploaded || {}, created });
-        setComposeUploadProgress(`发布完成：${uploadedCount} 张图片已上传并替换。`);
-        let doneMsg = `发布成功${created.id ? `（ID: ${created.id}）` : ''}`;
-        if (!postSave.ok) {
-          doneMsg += `；写回本地草稿失败：${postSave.error || ''}`;
-        }
-        showAppAlert(doneMsg);
-      })();
+      void runComposePublishPipeline(null);
+    });
+  }
+  const bookComposeNavUpload = document.getElementById('book-compose-nav-upload');
+  if (bookComposeNavUpload) {
+    bookComposeNavUpload.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (composeState.mode !== 'book') return;
+      syncBookComposeView('upload');
+    });
+  }
+  const bookUploadRefresh = document.getElementById('book-upload-refresh');
+  const bookUploadAll = document.getElementById('book-upload-all');
+  const bookUploadSelected = document.getElementById('book-upload-selected');
+  if (bookUploadRefresh) {
+    bookUploadRefresh.addEventListener('click', () => {
+      void refreshBookUploadPanel();
+    });
+  }
+  if (bookUploadAll) {
+    bookUploadAll.addEventListener('click', () => {
+      void runComposePublishPipeline('all');
+    });
+  }
+  if (bookUploadSelected) {
+    bookUploadSelected.addEventListener('click', () => {
+      void runComposePublishPipeline('selected');
     });
   }
 

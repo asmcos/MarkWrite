@@ -1884,6 +1884,102 @@ app.whenReady().then(() => {
   function isSafeDraftId(id) {
     return typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id);
   }
+  const BOOK_META_FILE = 'meta.json';
+  const BOOK_OUTLINE_FILE = 'outline.json';
+  const BOOK_CHAPTERS_DIR = 'chapters';
+  const BOOK_UPLOAD_SYNC_FILE = 'book-upload-sync.json';
+  function walkBookChapterIds(items, out) {
+    if (!Array.isArray(items)) return;
+    items.forEach((it) => {
+      if (!it || typeof it !== 'object') return;
+      if (it.type === 'chapter' && typeof it.id === 'number') out.push(it.id);
+      if (Array.isArray(it.children)) walkBookChapterIds(it.children, out);
+    });
+  }
+  function parseOutlineForChapterIds(outlineStr) {
+    try {
+      const j = JSON.parse(String(outlineStr || '').trim() || '[]');
+      const ids = [];
+      walkBookChapterIds(Array.isArray(j) ? j : [], ids);
+      return ids;
+    } catch (_) {
+      return [];
+    }
+  }
+  function walkOutlineChapterTitles(items, out) {
+    if (!Array.isArray(items)) return;
+    items.forEach((it) => {
+      if (!it || typeof it !== 'object') return;
+      if (it.type === 'chapter' && typeof it.id === 'number') {
+        out.push({ id: it.id, title: String(it.title || '') });
+      }
+      if (Array.isArray(it.children)) walkOutlineChapterTitles(it.children, out);
+    });
+  }
+  function partDirtyUpload(localMs, syncedMs) {
+    if (!localMs || localMs <= 0) return false;
+    if (syncedMs == null || Number(syncedMs) <= 0) return true;
+    return Math.abs(Number(localMs) - Number(syncedMs)) > 0.5;
+  }
+  function readBookDraftMeta(bookRoot) {
+    const fp = path.join(bookRoot, BOOK_META_FILE);
+    if (!fs.existsSync(fp)) return null;
+    const raw = fs.readFileSync(fp, 'utf8');
+    return JSON.parse(raw);
+  }
+  function loadBookDraftChapters(bookRoot, outlineStr) {
+    const ids = parseOutlineForChapterIds(outlineStr);
+    const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
+    const map = {};
+    ids.forEach((id) => {
+      const fp = path.join(chaptersDir, `${id}.md`);
+      if (fs.existsSync(fp)) {
+        try {
+          map[id] = fs.readFileSync(fp, 'utf8');
+        } catch (_) {
+          map[id] = '';
+        }
+      } else {
+        map[id] = '';
+      }
+    });
+    return map;
+  }
+  function joinBookDraftEditorContent(chapterMap, orderedIds) {
+    const parts = [];
+    orderedIds.forEach((id) => {
+      const body = chapterMap[id] != null ? String(chapterMap[id]) : '';
+      parts.push(`<!-- mw-chapter:${id} -->\n${body}`);
+    });
+    return parts.join('\n\n');
+  }
+  function splitComposePayloadIntoChapterMap(content, outlineStr) {
+    const ids = parseOutlineForChapterIds(outlineStr);
+    const s = String(content || '');
+    const re = /<!--\s*mw-chapter:(\d+)\s*-->/g;
+    const matches = [];
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      matches.push({ id: Number(m[1]), start: m.index, endAfter: m.index + m[0].length });
+    }
+    const map = {};
+    if (matches.length === 0) {
+      if (ids.length) map[ids[0]] = s;
+      ids.slice(1).forEach((id) => { map[id] = ''; });
+      return map;
+    }
+    for (let i = 0; i < matches.length; i++) {
+      const cur = matches[i];
+      const next = matches[i + 1];
+      let body = s.slice(cur.endAfter, next ? next.start : s.length);
+      if (body.startsWith('\n')) body = body.slice(1);
+      map[cur.id] = body;
+    }
+    ids.forEach((id) => {
+      if (map[id] === undefined) map[id] = '';
+    });
+    return map;
+  }
   function normalizeComposeTagsInput(tags) {
     if (Array.isArray(tags)) {
       return tags.map((t) => String(t || '').trim()).filter(Boolean);
@@ -1899,11 +1995,42 @@ app.whenReady().then(() => {
   ipcMain.handle('composeDrafts:list', async () => {
     try {
       const dir = ensureComposeDraftsDir();
-      const names = fs.readdirSync(dir).filter((n) => n.endsWith('.json'));
+      const entries = fs.readdirSync(dir);
+      const seenIds = new Set();
       const drafts = [];
-      for (const name of names) {
+      for (const name of entries) {
+        const abs = path.join(dir, name);
+        let st;
+        try {
+          st = fs.statSync(abs);
+        } catch (_) {
+          continue;
+        }
+        if (st.isDirectory()) {
+          if (!isSafeDraftId(name)) continue;
+          const meta = readBookDraftMeta(abs);
+          if (!meta || meta.mode !== 'book') continue;
+          seenIds.add(name);
+          const updatedAt = typeof meta.updatedAt === 'number' ? meta.updatedAt : 0;
+          const remoteId = typeof meta.remoteId === 'string' ? meta.remoteId : '';
+          const assetMap = (meta && typeof meta.assetMap === 'object' && meta.assetMap) ? meta.assetMap : {};
+          const assetCount = Object.keys(assetMap).length;
+          drafts.push({
+            id: name,
+            mode: 'book',
+            title: typeof meta.title === 'string' ? meta.title : '',
+            cover: typeof meta.cover === 'string' ? meta.cover : '',
+            updatedAt,
+            remoteId,
+            assetCount,
+          });
+        }
+      }
+      for (const name of entries) {
+        if (!name.endsWith('.json')) continue;
         const id = name.replace(/\.json$/i, '');
         if (!isSafeDraftId(id)) continue;
+        if (seenIds.has(id)) continue;
         const fp = path.join(dir, name);
         try {
           const raw = fs.readFileSync(fp, 'utf8');
@@ -1938,7 +2065,6 @@ app.whenReady().then(() => {
         return { ok: false, error: '作者不能为空' };
       }
       let id = typeof p.id === 'string' && isSafeDraftId(p.id) ? p.id : randomUUID();
-      const fp = path.join(dir, `${id}.json`);
       const now = Date.now();
       const tags = normalizeComposeTagsInput(p.tags);
       const assetMapRaw = p && typeof p.assetMap === 'object' && p.assetMap ? p.assetMap : {};
@@ -1954,17 +2080,6 @@ app.whenReady().then(() => {
       });
       const incomingRemoteId = typeof p.remoteId === 'string' ? p.remoteId.trim() : '';
       let persistedRemoteId = incomingRemoteId;
-      // 保护规则：已有 remoteId 的草稿，后续保存不能清空/替换成其他 id（避免误创建新远程内容）
-      if (fs.existsSync(fp)) {
-        try {
-          const rawOld = fs.readFileSync(fp, 'utf8');
-          const oldDraft = JSON.parse(rawOld);
-          const oldRemoteId = oldDraft && typeof oldDraft.remoteId === 'string' ? oldDraft.remoteId.trim() : '';
-          if (oldRemoteId) {
-            persistedRemoteId = oldRemoteId;
-          }
-        } catch (_) {}
-      }
       const coAuthorsRaw = p && p.coAuthors;
       let coAuthors = [];
       if (Array.isArray(coAuthorsRaw)) {
@@ -1975,16 +2090,107 @@ app.whenReady().then(() => {
             pubkey: String(x.pubkey).trim().slice(0, 128),
           }));
       }
+      const outlineStr = String(p.outline != null ? p.outline : '');
+      const legacyJsonPath = path.join(dir, `${id}.json`);
+      const bookRoot = path.join(dir, id);
+
+      if (modeSave === 'book') {
+        if (fs.existsSync(bookRoot) && fs.statSync(bookRoot).isDirectory()) {
+          try {
+            const oldMeta = readBookDraftMeta(bookRoot);
+            const oldRemoteId = oldMeta && typeof oldMeta.remoteId === 'string' ? oldMeta.remoteId.trim() : '';
+            if (oldRemoteId) persistedRemoteId = oldRemoteId;
+          } catch (_) {}
+        } else if (fs.existsSync(legacyJsonPath)) {
+          try {
+            const rawOld = fs.readFileSync(legacyJsonPath, 'utf8');
+            const oldDraft = JSON.parse(rawOld);
+            const oldRemoteId = oldDraft && typeof oldDraft.remoteId === 'string' ? oldDraft.remoteId.trim() : '';
+            if (oldRemoteId) persistedRemoteId = oldRemoteId;
+          } catch (_) {}
+        }
+        let chapterMap = {};
+        if (p.chapterContents && typeof p.chapterContents === 'object') {
+          Object.keys(p.chapterContents).forEach((k) => {
+            const n = Number(k);
+            if (!Number.isFinite(n)) return;
+            chapterMap[n] = String(p.chapterContents[k] != null ? p.chapterContents[k] : '');
+          });
+        } else {
+          chapterMap = splitComposePayloadIntoChapterMap(
+            typeof p.content === 'string' ? p.content : '',
+            outlineStr,
+          );
+        }
+        const chapterIds = parseOutlineForChapterIds(outlineStr);
+        chapterIds.forEach((cid) => {
+          if (chapterMap[cid] === undefined) chapterMap[cid] = '';
+        });
+        fs.mkdirSync(bookRoot, { recursive: true });
+        const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
+        fs.mkdirSync(chaptersDir, { recursive: true });
+        let outlineFileBody = '[]';
+        try {
+          const parsed = JSON.parse(outlineStr.trim() || '[]');
+          outlineFileBody = JSON.stringify(Array.isArray(parsed) ? parsed : [], null, 2);
+        } catch (_) {
+          outlineFileBody = '[]';
+        }
+        fs.writeFileSync(path.join(bookRoot, BOOK_OUTLINE_FILE), outlineFileBody, 'utf8');
+        chapterIds.forEach((cid) => {
+          const body = chapterMap[cid] != null ? String(chapterMap[cid]) : '';
+          fs.writeFileSync(path.join(chaptersDir, `${cid}.md`), body, 'utf8');
+        });
+        try {
+          const existing = fs.readdirSync(chaptersDir).filter((n) => n.endsWith('.md'));
+          const keep = new Set(chapterIds.map((cid) => `${cid}.md`));
+          existing.forEach((n) => {
+            if (!keep.has(n)) fs.unlinkSync(path.join(chaptersDir, n));
+          });
+        } catch (_) {}
+        const meta = {
+          id,
+          mode: 'book',
+          title: String(p.title != null ? p.title : '').slice(0, 500),
+          tags,
+          cover: String(p.cover != null ? p.cover : ''),
+          extra: String(p.extra != null ? p.extra : ''),
+          author: String(p.author != null ? p.author : '').slice(0, 200),
+          coAuthors,
+          remoteId: persistedRemoteId,
+          assetMap,
+          updatedAt: now,
+        };
+        fs.writeFileSync(path.join(bookRoot, BOOK_META_FILE), JSON.stringify(meta, null, 2), 'utf8');
+        if (fs.existsSync(legacyJsonPath)) {
+          try {
+            fs.unlinkSync(legacyJsonPath);
+          } catch (_) {}
+        }
+        return { ok: true, id };
+      }
+
+      const fp = legacyJsonPath;
+      if (fs.existsSync(fp)) {
+        try {
+          const rawOld = fs.readFileSync(fp, 'utf8');
+          const oldDraft = JSON.parse(rawOld);
+          const oldRemoteId = oldDraft && typeof oldDraft.remoteId === 'string' ? oldDraft.remoteId.trim() : '';
+          if (oldRemoteId) {
+            persistedRemoteId = oldRemoteId;
+          }
+        } catch (_) {}
+      }
       const draft = {
         id,
-        mode: p.mode === 'book' ? 'book' : 'blog',
+        mode: 'blog',
         title: String(p.title != null ? p.title : '').slice(0, 500),
         tags,
         cover: String(p.cover != null ? p.cover : ''),
         extra: String(p.extra != null ? p.extra : ''),
         author: String(p.author != null ? p.author : '').slice(0, 200),
         coAuthors,
-        outline: String(p.outline != null ? p.outline : ''),
+        outline: outlineStr,
         content: typeof p.content === 'string' ? p.content : '',
         remoteId: persistedRemoteId,
         assetMap,
@@ -2000,9 +2206,47 @@ app.whenReady().then(() => {
     try {
       if (!isSafeDraftId(id)) return { ok: false, error: '无效的草稿 id' };
       const dir = ensureComposeDraftsDir();
-      const fp = path.join(dir, `${id}.json`);
-      if (!fs.existsSync(fp)) return { ok: false, error: '草稿不存在' };
-      const raw = fs.readFileSync(fp, 'utf8');
+      const bookRoot = path.join(dir, id);
+      const legacyFp = path.join(dir, `${id}.json`);
+      if (fs.existsSync(bookRoot) && fs.statSync(bookRoot).isDirectory()) {
+        const meta = readBookDraftMeta(bookRoot);
+        if (!meta || meta.mode !== 'book') return { ok: false, error: '草稿不存在' };
+        let outlineStr = '[]';
+        try {
+          const ofp = path.join(bookRoot, BOOK_OUTLINE_FILE);
+          if (fs.existsSync(ofp)) outlineStr = fs.readFileSync(ofp, 'utf8');
+        } catch (_) {}
+        const chapterMap = loadBookDraftChapters(bookRoot, outlineStr);
+        const chapterIds = parseOutlineForChapterIds(outlineStr);
+        const contentJoined = joinBookDraftEditorContent(chapterMap, chapterIds);
+        let coAuthorsLoad = [];
+        if (Array.isArray(meta.coAuthors)) {
+          coAuthorsLoad = meta.coAuthors
+            .filter((x) => x && typeof x === 'object' && typeof x.pubkey === 'string')
+            .map((x) => ({
+              email: typeof x.email === 'string' ? x.email : '',
+              pubkey: String(x.pubkey).trim(),
+            }));
+        }
+        const draft = {
+          id,
+          mode: 'book',
+          title: typeof meta.title === 'string' ? meta.title : '',
+          tags: normalizeComposeTagsInput(meta.tags),
+          cover: typeof meta.cover === 'string' ? meta.cover : '',
+          extra: typeof meta.extra === 'string' ? meta.extra : '',
+          author: typeof meta.author === 'string' ? meta.author : '',
+          coAuthors: coAuthorsLoad,
+          outline: outlineStr,
+          content: contentJoined,
+          remoteId: typeof meta.remoteId === 'string' ? meta.remoteId : '',
+          assetMap: (meta && typeof meta.assetMap === 'object' && meta.assetMap) ? meta.assetMap : {},
+          updatedAt: typeof meta.updatedAt === 'number' ? meta.updatedAt : 0,
+        };
+        return { ok: true, draft };
+      }
+      if (!fs.existsSync(legacyFp)) return { ok: false, error: '草稿不存在' };
+      const raw = fs.readFileSync(legacyFp, 'utf8');
       const j = JSON.parse(raw);
       let coAuthorsLoad = [];
       if (Array.isArray(j.coAuthors)) {
@@ -2037,11 +2281,173 @@ app.whenReady().then(() => {
     try {
       if (!isSafeDraftId(id)) return { ok: false, error: '无效的草稿 id' };
       const dir = ensureComposeDraftsDir();
+      const bookRoot = path.join(dir, id);
       const fp = path.join(dir, `${id}.json`);
+      if (fs.existsSync(bookRoot) && fs.statSync(bookRoot).isDirectory()) {
+        fs.rmSync(bookRoot, { recursive: true, force: true });
+        return { ok: true };
+      }
       if (fs.existsSync(fp)) fs.unlinkSync(fp);
       return { ok: true };
     } catch (e) {
       return { ok: false, error: String(e && e.message ? e.message : e) };
+    }
+  });
+
+  ipcMain.handle('compose:bookUploadDiff', async (_event, payload) => {
+    try {
+      const p = payload && typeof payload === 'object' ? payload : {};
+      const draftId = typeof p.draftId === 'string' ? p.draftId.trim() : '';
+      if (!isSafeDraftId(draftId)) return { ok: false, message: '无效的草稿 id' };
+      const dir = ensureComposeDraftsDir();
+      const bookRoot = path.join(dir, draftId);
+      const legacyFp = path.join(dir, `${draftId}.json`);
+      if (fs.existsSync(legacyFp) && (!fs.existsSync(bookRoot) || !fs.statSync(bookRoot).isDirectory())) {
+        try {
+          const raw = fs.readFileSync(legacyFp, 'utf8');
+          const j = JSON.parse(raw);
+          if (j.mode === 'book') {
+            return {
+              ok: true,
+              isLegacyJson: true,
+              message: '当前为单文件书籍草稿，请先点击「保存草稿」转为目录草稿后再上传。',
+              remoteId: '',
+              hasRemoteId: false,
+              parts: [],
+            };
+          }
+        } catch (_) {}
+      }
+      if (!fs.existsSync(bookRoot) || !fs.statSync(bookRoot).isDirectory()) {
+        return { ok: false, message: '书籍目录草稿不存在，请先保存草稿' };
+      }
+      const metaPath = path.join(bookRoot, BOOK_META_FILE);
+      if (!fs.existsSync(metaPath)) return { ok: false, message: '缺少 meta.json' };
+      const meta = readBookDraftMeta(bookRoot);
+      const remoteId = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
+      let outlineStr = '[]';
+      try {
+        const ofp = path.join(bookRoot, BOOK_OUTLINE_FILE);
+        if (fs.existsSync(ofp)) outlineStr = fs.readFileSync(ofp, 'utf8');
+      } catch (_) {}
+      let outlineParsed = [];
+      try {
+        outlineParsed = JSON.parse(outlineStr.trim() || '[]');
+        if (!Array.isArray(outlineParsed)) outlineParsed = [];
+      } catch (_) {
+        outlineParsed = [];
+      }
+      const chapterTitles = [];
+      walkOutlineChapterTitles(outlineParsed, chapterTitles);
+      const syncPath = path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE);
+      let sync = {};
+      try {
+        if (fs.existsSync(syncPath)) sync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
+      } catch (_) {}
+      function statMs(fp) {
+        try {
+          return fs.statSync(fp).mtimeMs;
+        } catch (_) {
+          return 0;
+        }
+      }
+      const metaMs = statMs(metaPath);
+      const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
+      const outlineMs = statMs(outlinePath);
+      const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
+      const sm = sync.syncedMetaMtimeMs;
+      const so = sync.syncedOutlineMtimeMs;
+      const sc = sync.syncedChapters && typeof sync.syncedChapters === 'object' ? sync.syncedChapters : {};
+      const parts = [];
+      parts.push({
+        partId: 'meta',
+        kind: 'meta',
+        label: '书籍信息（标题、封面、作者、标签等）',
+        mtimeMs: metaMs,
+        syncedMtimeMs: typeof sm === 'number' ? sm : 0,
+        dirty: partDirtyUpload(metaMs, sm),
+      });
+      parts.push({
+        partId: 'outline',
+        kind: 'outline',
+        label: '大纲',
+        mtimeMs: outlineMs,
+        syncedMtimeMs: typeof so === 'number' ? so : 0,
+        dirty: partDirtyUpload(outlineMs, so),
+      });
+      chapterTitles.forEach(({ id, title }) => {
+        const cfp = path.join(chaptersDir, `${id}.md`);
+        const cms = statMs(cfp);
+        const synced = sc[id] != null ? sc[id] : sc[String(id)];
+        const syncedNum = typeof synced === 'number' ? synced : 0;
+        parts.push({
+          partId: `chapter:${id}`,
+          kind: 'chapter',
+          chapterId: id,
+          label: title ? `章节：${title}` : `章节 #${id}`,
+          mtimeMs: cms,
+          syncedMtimeMs: syncedNum,
+          dirty: partDirtyUpload(cms, syncedNum),
+        });
+      });
+      return {
+        ok: true,
+        isLegacyJson: false,
+        remoteId,
+        hasRemoteId: Boolean(remoteId),
+        parts,
+      };
+    } catch (e) {
+      return { ok: false, message: String(e && e.message ? e.message : e) };
+    }
+  });
+
+  ipcMain.handle('compose:bookUploadMarkSynced', async (_event, payload) => {
+    try {
+      const p = payload && typeof payload === 'object' ? payload : {};
+      const draftId = typeof p.draftId === 'string' ? p.draftId.trim() : '';
+      if (!isSafeDraftId(draftId)) return { ok: false, message: '无效的草稿 id' };
+      const dir = ensureComposeDraftsDir();
+      const bookRoot = path.join(dir, draftId);
+      if (!fs.existsSync(bookRoot) || !fs.statSync(bookRoot).isDirectory()) {
+        return { ok: false, message: '书籍目录不存在' };
+      }
+      const metaPath = path.join(bookRoot, BOOK_META_FILE);
+      const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
+      const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
+      let outlineStr = '[]';
+      try {
+        if (fs.existsSync(outlinePath)) outlineStr = fs.readFileSync(outlinePath, 'utf8');
+      } catch (_) {}
+      const chapterIds = parseOutlineForChapterIds(outlineStr);
+      function statMs(fp) {
+        try {
+          return fs.statSync(fp).mtimeMs;
+        } catch (_) {
+          return 0;
+        }
+      }
+      const syncedChapters = {};
+      chapterIds.forEach((cid) => {
+        syncedChapters[cid] = statMs(path.join(chaptersDir, `${cid}.md`));
+      });
+      const meta = readBookDraftMeta(bookRoot);
+      const remoteId = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
+      const out = {
+        remoteId,
+        syncedMetaMtimeMs: statMs(metaPath),
+        syncedOutlineMtimeMs: statMs(outlinePath),
+        syncedChapters,
+        lastUploadAt: Date.now(),
+      };
+      fs.writeFileSync(
+        path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE),
+        JSON.stringify(out, null, 2),
+        'utf8',
+      );
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: String(e && e.message ? e.message : e) };
     }
   });
 

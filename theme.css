@@ -604,6 +604,40 @@ html[data-theme="light"] .book-compose-nav-desc {
 html[data-theme="light"] .book-compose-nav-item.is-active .book-compose-nav-desc {
   color: var(--mw-text-muted);
 }
+html[data-theme="light"] .book-upload-intro {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-upload-intro code {
+  background: var(--mw-surface-muted);
+  color: var(--mw-text-secondary);
+}
+html[data-theme="light"] .book-upload-part {
+  border-color: var(--mw-border);
+  background: #ffffff;
+}
+html[data-theme="light"] .book-upload-part-title {
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-upload-part-meta {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-upload-remote-line {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-upload-part-upload {
+  border-color: rgba(37, 99, 235, 0.35);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+html[data-theme="light"] .book-upload-part-upload:hover:not(:disabled) {
+  background: #dbeafe;
+  border-color: rgba(37, 99, 235, 0.5);
+}
+html[data-theme="light"] .book-upload-part-upload:disabled {
+  border-color: var(--mw-border);
+  background: var(--mw-surface-muted);
+  color: var(--mw-text-muted);
+}
 html[data-theme="light"] .content-compose-outline-input {
   border: 1px solid var(--mw-input-border);
   background: #ffffff;
