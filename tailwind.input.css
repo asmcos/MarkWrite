@@ -1,40 +1,49 @@
 @import 'tailwindcss';
 
-/* 设置 → 外观：主题二选一，仅在对应全局主题下生效 */
+/* 与 theme.css 浅色令牌对齐（参考 eventstoreUI：灰边输入、蓝→紫主色） */
+@theme inline {
+  --color-mw-canvas: #f1f5f9;
+  --color-mw-surface: #ffffff;
+  --color-mw-surface-muted: #f8fafc;
+  --color-mw-accent: #2563eb;
+  --color-mw-primary-from: #2563eb;
+  --color-mw-primary-to: #9333ea;
+}
+
 @custom-variant mw-light (html[data-theme='light'] &);
 @custom-variant mw-dark (html[data-theme='dark'] &);
 
 /**
- * 选中态用 @apply；未选中描边在 theme.css 用 #settings-overlay …:not(.is-theme-active) 再写一遍，
- * 因本段在 @layer 内，易被未分层样式盖掉导致「看不到边框」。
+ * 设置 → 外观主题切换；浅色选中「浅色」与 eventstore 蓝紫系一致。
+ * 未选中描边见 theme.css #settings-overlay …:not(.is-theme-active)。
  */
 @layer components {
   .settings-theme-toggle {
-    @apply inline-flex min-w-[140px] cursor-pointer appearance-none items-center justify-center gap-2 rounded-xl border-2 px-4 py-2.5 text-xs font-semibold tracking-wide transition-all duration-200 ease-out;
-    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 focus-visible:ring-offset-2 mw-dark:focus-visible:ring-sky-400/75;
+    @apply inline-flex min-w-[140px] cursor-pointer appearance-none items-center justify-center gap-2 rounded-2xl border-2 px-4 py-2.5 text-xs font-semibold tracking-wide transition-all duration-200 ease-out;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-white mw-dark:focus-visible:ring-sky-400/75 mw-dark:focus-visible:ring-offset-slate-900;
     @apply [&_.bi]:text-[1.05rem] [&_.bi]:leading-none [&_.bi]:opacity-90;
 
-    /* ---------- 全局浅色：未选中（实线边框，与已选区分靠 ring / 填充） ---------- */
-    @apply mw-light:aria-[pressed=false]:border-solid mw-light:aria-[pressed=false]:border-stone-400 mw-light:aria-[pressed=false]:bg-white/70 mw-light:aria-[pressed=false]:text-stone-400 mw-light:aria-[pressed=false]:shadow-none mw-light:aria-[pressed=false]:ring-0;
-    @apply mw-light:aria-[pressed=false]:hover:border-stone-500 mw-light:aria-[pressed=false]:hover:bg-stone-50 mw-light:aria-[pressed=false]:hover:text-stone-600;
+    /* 全局浅色：未选中（与令牌一致，最终描边以 theme.css 为准） */
+    @apply mw-light:aria-[pressed=false]:border-solid mw-light:aria-[pressed=false]:border-slate-300 mw-light:aria-[pressed=false]:bg-slate-50/90 mw-light:aria-[pressed=false]:text-slate-500 mw-light:aria-[pressed=false]:shadow-sm mw-light:aria-[pressed=false]:ring-0;
+    @apply mw-light:aria-[pressed=false]:hover:border-slate-400 mw-light:aria-[pressed=false]:hover:bg-white mw-light:aria-[pressed=false]:hover:text-slate-700;
 
-    /* ---------- 全局浅色：选中「浅色」 ---------- */
-    @apply mw-light:aria-pressed:data-[theme-choice=light]:border-solid mw-light:aria-pressed:data-[theme-choice=light]:border-amber-500 mw-light:aria-pressed:data-[theme-choice=light]:bg-gradient-to-br mw-light:aria-pressed:data-[theme-choice=light]:from-amber-50 mw-light:aria-pressed:data-[theme-choice=light]:via-white mw-light:aria-pressed:data-[theme-choice=light]:to-amber-100 mw-light:aria-pressed:data-[theme-choice=light]:text-amber-950 mw-light:aria-pressed:data-[theme-choice=light]:shadow-md;
-    @apply mw-light:aria-pressed:data-[theme-choice=light]:ring-2 mw-light:aria-pressed:data-[theme-choice=light]:ring-amber-400 mw-light:aria-pressed:data-[theme-choice=light]:ring-offset-2 mw-light:aria-pressed:data-[theme-choice=light]:ring-offset-stone-100;
+    /* 浅色：选中「浅色」→ 蓝紫浅渐变（对齐 eventstore CTA 色相） */
+    @apply mw-light:aria-pressed:data-[theme-choice=light]:border-solid mw-light:aria-pressed:data-[theme-choice=light]:border-indigo-300 mw-light:aria-pressed:data-[theme-choice=light]:bg-gradient-to-br mw-light:aria-pressed:data-[theme-choice=light]:from-blue-50 mw-light:aria-pressed:data-[theme-choice=light]:via-white mw-light:aria-pressed:data-[theme-choice=light]:to-purple-50 mw-light:aria-pressed:data-[theme-choice=light]:text-indigo-950 mw-light:aria-pressed:data-[theme-choice=light]:shadow-md;
+    @apply mw-light:aria-pressed:data-[theme-choice=light]:ring-2 mw-light:aria-pressed:data-[theme-choice=light]:ring-indigo-300/70 mw-light:aria-pressed:data-[theme-choice=light]:ring-offset-2 mw-light:aria-pressed:data-[theme-choice=light]:ring-offset-slate-50;
 
-    /* ---------- 全局浅色：选中「深色」 ---------- */
-    @apply mw-light:aria-pressed:data-[theme-choice=dark]:border-solid mw-light:aria-pressed:data-[theme-choice=dark]:border-slate-600 mw-light:aria-pressed:data-[theme-choice=dark]:bg-gradient-to-br mw-light:aria-pressed:data-[theme-choice=dark]:from-slate-700 mw-light:aria-pressed:data-[theme-choice=dark]:to-zinc-950 mw-light:aria-pressed:data-[theme-choice=dark]:text-zinc-50 mw-light:aria-pressed:data-[theme-choice=dark]:shadow-lg;
-    @apply mw-light:aria-pressed:data-[theme-choice=dark]:ring-2 mw-light:aria-pressed:data-[theme-choice=dark]:ring-slate-400/70 mw-light:aria-pressed:data-[theme-choice=dark]:ring-offset-2 mw-light:aria-pressed:data-[theme-choice=dark]:ring-offset-stone-100;
+    /* 浅色：选中「深色」→ slate 沉色块 */
+    @apply mw-light:aria-pressed:data-[theme-choice=dark]:border-solid mw-light:aria-pressed:data-[theme-choice=dark]:border-slate-600 mw-light:aria-pressed:data-[theme-choice=dark]:bg-gradient-to-br mw-light:aria-pressed:data-[theme-choice=dark]:from-slate-700 mw-light:aria-pressed:data-[theme-choice=dark]:to-slate-950 mw-light:aria-pressed:data-[theme-choice=dark]:text-slate-50 mw-light:aria-pressed:data-[theme-choice=dark]:shadow-lg;
+    @apply mw-light:aria-pressed:data-[theme-choice=dark]:ring-2 mw-light:aria-pressed:data-[theme-choice=dark]:ring-slate-500/50 mw-light:aria-pressed:data-[theme-choice=dark]:ring-offset-2 mw-light:aria-pressed:data-[theme-choice=dark]:ring-offset-slate-100;
 
-    /* ---------- 全局深色：未选中 ---------- */
+    /* 全局深色：未选中 */
     @apply mw-dark:aria-[pressed=false]:border-solid mw-dark:aria-[pressed=false]:border-slate-500 mw-dark:aria-[pressed=false]:bg-slate-900/50 mw-dark:aria-[pressed=false]:text-slate-500 mw-dark:aria-[pressed=false]:shadow-none mw-dark:aria-[pressed=false]:ring-0;
     @apply mw-dark:aria-[pressed=false]:hover:border-slate-400 mw-dark:aria-[pressed=false]:hover:bg-slate-800/70 mw-dark:aria-[pressed=false]:hover:text-slate-300;
 
-    /* ---------- 全局深色：选中「浅色」 ---------- */
-    @apply mw-dark:aria-pressed:data-[theme-choice=light]:border-solid mw-dark:aria-pressed:data-[theme-choice=light]:border-amber-400 mw-dark:aria-pressed:data-[theme-choice=light]:bg-gradient-to-br mw-dark:aria-pressed:data-[theme-choice=light]:from-amber-100 mw-dark:aria-pressed:data-[theme-choice=light]:to-amber-200 mw-dark:aria-pressed:data-[theme-choice=light]:text-amber-950 mw-dark:aria-pressed:data-[theme-choice=light]:shadow-md;
-    @apply mw-dark:aria-pressed:data-[theme-choice=light]:ring-2 mw-dark:aria-pressed:data-[theme-choice=light]:ring-amber-300 mw-dark:aria-pressed:data-[theme-choice=light]:ring-offset-2 mw-dark:aria-pressed:data-[theme-choice=light]:ring-offset-slate-900;
+    /* 全局深色：选中「浅色」 */
+    @apply mw-dark:aria-pressed:data-[theme-choice=light]:border-solid mw-dark:aria-pressed:data-[theme-choice=light]:border-sky-400 mw-dark:aria-pressed:data-[theme-choice=light]:bg-gradient-to-br mw-dark:aria-pressed:data-[theme-choice=light]:from-sky-100 mw-dark:aria-pressed:data-[theme-choice=light]:to-sky-200 mw-dark:aria-pressed:data-[theme-choice=light]:text-sky-950 mw-dark:aria-pressed:data-[theme-choice=light]:shadow-md;
+    @apply mw-dark:aria-pressed:data-[theme-choice=light]:ring-2 mw-dark:aria-pressed:data-[theme-choice=light]:ring-sky-300 mw-dark:aria-pressed:data-[theme-choice=light]:ring-offset-2 mw-dark:aria-pressed:data-[theme-choice=light]:ring-offset-slate-900;
 
-    /* ---------- 全局深色：选中「深色」 ---------- */
+    /* 全局深色：选中「深色」 */
     @apply mw-dark:aria-pressed:data-[theme-choice=dark]:border-solid mw-dark:aria-pressed:data-[theme-choice=dark]:border-sky-500/90 mw-dark:aria-pressed:data-[theme-choice=dark]:bg-gradient-to-br mw-dark:aria-pressed:data-[theme-choice=dark]:from-slate-700 mw-dark:aria-pressed:data-[theme-choice=dark]:via-slate-900 mw-dark:aria-pressed:data-[theme-choice=dark]:to-slate-950 mw-dark:aria-pressed:data-[theme-choice=dark]:text-slate-50 mw-dark:aria-pressed:data-[theme-choice=dark]:shadow-lg;
     @apply mw-dark:aria-pressed:data-[theme-choice=dark]:ring-2 mw-dark:aria-pressed:data-[theme-choice=dark]:ring-sky-400/60 mw-dark:aria-pressed:data-[theme-choice=dark]:ring-offset-2 mw-dark:aria-pressed:data-[theme-choice=dark]:ring-offset-slate-950;
   }

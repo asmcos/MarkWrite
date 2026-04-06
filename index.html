@@ -99,8 +99,8 @@
 
       <div class="pane pane-files" id="pane-files">
         <div class="pane-header">
-          <div>Files</div>
-          <span class="pane-header-actions">
+          <div id="pane-files-title">Files</div>
+          <span class="pane-header-actions" id="pane-files-actions-explorer">
             <span>Explorer</span>
             <button type="button" class="icon-btn" id="btn-refresh-files" title="刷新工作区">
               <i class="bi bi-arrow-clockwise"></i>
@@ -110,8 +110,54 @@
             </button>
           </span>
         </div>
-        <div class="pane-body" style="padding-left:0px;">
-          <ul class="file-list" id="file-tree"></ul>
+        <div class="pane-body pane-files-body" style="padding-left: 0">
+          <div id="pane-files-explorer-body" class="pane-files-explorer-body">
+            <ul class="file-list" id="file-tree"></ul>
+          </div>
+          <div id="pane-files-outline-body" class="pane-files-outline-body">
+            <nav class="book-compose-left-nav" id="book-compose-left-nav" aria-label="书籍创作">
+              <button type="button" class="book-compose-nav-item is-active" id="book-compose-nav-info" data-book-view="info">
+                <i class="bi bi-journal-text"></i>
+                <span class="book-compose-nav-text">
+                  <span class="book-compose-nav-title">书籍信息</span>
+                  <span class="book-compose-nav-desc">封面、标题、作者、标签与简介</span>
+                </span>
+              </button>
+              <button type="button" class="book-compose-nav-item" id="book-compose-nav-editor" data-book-view="editor">
+                <i class="bi bi-pencil-square"></i>
+                <span class="book-compose-nav-text">
+                  <span class="book-compose-nav-title">编辑正文</span>
+                  <span class="book-compose-nav-desc">Markdown 全书正文</span>
+                </span>
+              </button>
+            </nav>
+            <div id="book-compose-outline-section" class="book-compose-outline-section">
+              <div class="book-outline-toolbar">
+                <div class="book-outline-toolbar-row book-outline-toolbar-row--full">
+                  <button type="button" class="book-outline-tool-btn" id="book-outline-edit-json" title="以 JSON 编辑大纲">
+                    <i class="bi bi-code-slash"></i> 编辑大纲
+                  </button>
+                </div>
+                <div class="book-outline-toolbar-row book-outline-toolbar-row--pair">
+                  <button type="button" class="book-outline-tool-btn" id="book-outline-add-folder" title="新建目录">
+                    <i class="bi bi-folder-plus"></i> 新建目录
+                  </button>
+                  <button type="button" class="book-outline-tool-btn" id="book-outline-add-chapter" title="新建章节">
+                    <i class="bi bi-file-earmark-plus"></i> 新建章节
+                  </button>
+                </div>
+              </div>
+              <div id="book-outline-tree" class="book-outline-tree" aria-label="书籍大纲"></div>
+              <textarea
+                id="content-compose-outline"
+                class="content-compose-outline-input"
+                spellcheck="false"
+                aria-hidden="true"
+                tabindex="-1"
+                style="position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; pointer-events: none"
+              ></textarea>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -135,25 +181,47 @@
                 <i class="bi bi-x-lg"></i>
               </button>
             </div>
-            <div class="content-compose-grid content-compose-grid--top">
-              <div class="content-compose-field">
-                <label for="content-compose-main-title">标题</label>
-                <input id="content-compose-main-title" type="text" placeholder="请输入标题" maxlength="120" />
-              </div>
-              <div class="content-compose-field content-compose-cover-field">
-                <label>封面（正方形）</label>
-                <div class="content-compose-cover-row">
-                  <div class="content-compose-cover-preview" id="content-compose-cover-preview" title="上传或截图">
-                    <i class="bi bi-image"></i>
-                  </div>
-                  <div class="content-compose-cover-side">
-                    <div class="content-compose-cover-actions">
-                      <button type="button" class="content-compose-mini-btn" id="content-compose-cover-upload">上传图片</button>
-                      <button type="button" class="content-compose-mini-btn" id="content-compose-cover-screenshot">截图粘贴</button>
+            <div id="book-compose-info-block" class="book-compose-info-block">
+              <div class="content-compose-grid content-compose-grid--top">
+                <div class="content-compose-field">
+                  <label for="content-compose-main-title">标题</label>
+                  <input id="content-compose-main-title" type="text" placeholder="请输入标题" maxlength="120" />
+                </div>
+                <div class="content-compose-field content-compose-cover-field">
+                  <label>封面（正方形）</label>
+                  <div class="content-compose-cover-row">
+                    <div class="content-compose-cover-preview" id="content-compose-cover-preview" title="点击上传或截图粘贴封面">
+                      <i class="bi bi-image"></i>
                     </div>
-                    <p class="content-compose-cover-hint">仅支持上传或剪贴板截图，预览为居中裁剪的正方形。</p>
-                    <input id="content-compose-cover-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />
-                    <input type="hidden" id="content-compose-cover" value="" />
+                    <div class="content-compose-cover-side">
+                      <div class="content-compose-cover-actions">
+                        <button type="button" class="content-compose-mini-btn" id="content-compose-cover-upload">上传图片</button>
+                        <button type="button" class="content-compose-mini-btn" id="content-compose-cover-screenshot">截图粘贴</button>
+                      </div>
+                      <p class="content-compose-cover-hint">仅支持上传或剪贴板截图，预览为居中裁剪的正方形。</p>
+                      <input id="content-compose-cover-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />
+                      <input type="hidden" id="content-compose-cover" value="" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- 书籍模式：eventstoreUI 风格说明卡片 -->
+              <div
+                class="content-compose-book-shell"
+                id="content-compose-book-shell"
+                style="display:none;"
+                aria-hidden="true"
+              >
+                <div class="content-compose-book-banner">
+                  <div class="content-compose-book-banner-glow" aria-hidden="true"></div>
+                  <span class="content-compose-book-banner-icon" aria-hidden="true"
+                    ><i class="bi bi-book-half"></i
+                  ></span>
+                  <div class="content-compose-book-banner-text">
+                    <div class="content-compose-book-banner-title">创建书籍</div>
+                    <p class="content-compose-book-banner-desc" id="content-compose-book-banner-desc">
+                      在左侧切换「编辑正文」可编辑大纲与全书正文；本页填写封面、作者与简介。
+                    </p>
                   </div>
                 </div>
               </div>
@@ -198,39 +266,54 @@
               <div id="md-preview" class="md-preview-body">预览将显示在这里…</div>
             </div>
           </div>
-          <div class="content-compose-bottom-tools">
-            <div class="content-compose-field">
-              <label for="content-compose-tag-input">标签</label>
-              <div class="content-compose-tags-editor">
-                <div class="content-compose-tags-list" id="content-compose-tags-list"></div>
-                <div class="content-compose-tags-add-row">
-                  <input
-                    type="text"
-                    id="content-compose-tag-input"
-                    class="content-compose-tag-input"
-                    placeholder="输入标签，回车或点击添加"
-                    maxlength="32"
-                    autocomplete="off"
-                  />
-                  <button type="button" class="content-compose-mini-btn" id="content-compose-tag-add">添加</button>
+          <div class="content-compose-bottom-tools" id="content-compose-bottom-tools">
+            <div id="content-compose-meta-tools" class="content-compose-meta-tools">
+              <div class="content-compose-field">
+                <label for="content-compose-tag-input">标签</label>
+                <div class="content-compose-tags-editor">
+                  <div class="content-compose-tags-list" id="content-compose-tags-list"></div>
+                  <div class="content-compose-tags-add-row">
+                    <input
+                      type="text"
+                      id="content-compose-tag-input"
+                      class="content-compose-tag-input"
+                      placeholder="输入标签，回车或点击添加"
+                      maxlength="32"
+                      autocomplete="off"
+                    />
+                    <button type="button" class="content-compose-mini-btn" id="content-compose-tag-add">添加</button>
+                  </div>
                 </div>
+                <input type="hidden" id="content-compose-tags" value="" />
               </div>
-              <input type="hidden" id="content-compose-tags" value="" />
+              <div class="content-compose-field" id="content-compose-author-wrap" style="display: none">
+                <label for="content-compose-author">作者<span class="content-compose-required-mark" aria-hidden="true"> *</span></label>
+                <input
+                  type="text"
+                  id="content-compose-author"
+                  placeholder="请输入作者署名"
+                  maxlength="120"
+                  autocomplete="off"
+                  aria-required="true"
+                />
+              </div>
+              <div class="content-compose-field" id="content-compose-extra-wrap">
+                <label for="content-compose-extra">简介</label>
+                <textarea id="content-compose-extra" rows="4" placeholder="内容简介（可选）"></textarea>
+              </div>
+              <div class="content-compose-generate-actions">
+                <button type="button" class="content-compose-mini-btn" id="content-compose-generate-tags">生成标签</button>
+                <button type="button" class="content-compose-mini-btn" id="content-compose-generate-summary">生成简介</button>
+                <span class="content-compose-generate-status" id="content-compose-generate-status" style="display:none;"></span>
+              </div>
             </div>
-            <div class="content-compose-field" id="content-compose-extra-wrap">
-              <label for="content-compose-extra">简介</label>
-              <textarea id="content-compose-extra" rows="4" placeholder="内容简介（可选）"></textarea>
+            <div id="content-compose-actions-footer" class="content-compose-actions-footer">
+              <div class="content-compose-actions">
+                <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="content-compose-save-draft">保存草稿</button>
+                <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="content-compose-publish">发布</button>
+              </div>
+              <div class="content-compose-upload-progress" id="content-compose-upload-progress" style="display:none;"></div>
             </div>
-            <div class="content-compose-generate-actions">
-              <button type="button" class="content-compose-mini-btn" id="content-compose-generate-tags">生成标签</button>
-              <button type="button" class="content-compose-mini-btn" id="content-compose-generate-summary">生成简介</button>
-              <span class="content-compose-generate-status" id="content-compose-generate-status" style="display:none;"></span>
-            </div>
-            <div class="content-compose-actions">
-              <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="content-compose-save-draft">保存草稿</button>
-              <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="content-compose-publish">发布</button>
-            </div>
-            <div class="content-compose-upload-progress" id="content-compose-upload-progress" style="display:none;"></div>
           </div>
         </div>
       </div>
@@ -334,6 +417,48 @@
         </div>
       </div>
     </div>
+    <div id="book-outline-json-modal" class="book-outline-json-modal" style="display: none" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="book-outline-json-modal-title">
+      <div class="book-outline-json-modal-box">
+        <div class="book-outline-json-modal-head">
+          <span id="book-outline-json-modal-title">编辑原始大纲 (JSON)</span>
+          <button type="button" class="book-outline-json-dismiss" title="关闭">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <p class="book-outline-json-hint">每项需含 id、title、type（chapter 或 folder）；folder 可有 children 数组。</p>
+        <textarea id="book-outline-json-textarea" class="book-outline-json-textarea" spellcheck="false"></textarea>
+        <div id="book-outline-json-error" class="book-outline-json-error" role="alert"></div>
+        <div class="book-outline-json-modal-actions">
+          <button type="button" class="content-compose-mini-btn book-outline-json-dismiss">取消</button>
+          <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="book-outline-json-apply">应用更改</button>
+        </div>
+      </div>
+    </div>
+    <div
+      id="book-outline-rename-modal"
+      class="book-outline-rename-modal"
+      style="display: none"
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="book-outline-rename-modal-title"
+    >
+      <div class="book-outline-rename-modal-box">
+        <div class="book-outline-rename-modal-head">
+          <span id="book-outline-rename-modal-title">重命名</span>
+          <button type="button" class="book-outline-json-dismiss book-outline-rename-dismiss" title="关闭">
+            <i class="bi bi-x-lg"></i>
+          </button>
+        </div>
+        <label for="book-outline-rename-input" id="book-outline-rename-label" class="book-outline-rename-label">名称</label>
+        <input type="text" id="book-outline-rename-input" class="book-outline-rename-input" maxlength="200" autocomplete="off" />
+        <div class="book-outline-rename-modal-actions">
+          <button type="button" class="content-compose-mini-btn book-outline-rename-dismiss">取消</button>
+          <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="book-outline-rename-confirm">确定</button>
+        </div>
+      </div>
+    </div>
+    <script src="./lib/book-outline.js"></script>
     <script src="/node_modules/monaco-editor/min/vs/loader.js"></script>
     <script src="/node_modules/mermaid/dist/mermaid.min.js"></script>
     <script>

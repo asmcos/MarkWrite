@@ -238,13 +238,53 @@ window.addEventListener('DOMContentLoaded', async () => {
     const titleEl = document.getElementById('content-compose-main-title');
     const coverEl = document.getElementById('content-compose-cover');
     const extraEl = document.getElementById('content-compose-extra');
+    const authorEl = document.getElementById('content-compose-author');
+    const outlineEl = document.getElementById('content-compose-outline');
     return {
       title: (titleEl && titleEl.value.trim()) || '',
       tags: composeState.tags.length ? composeState.tags.join(', ') : '',
       cover: (coverEl && coverEl.value.trim()) || '',
       extra: (extraEl && extraEl.value.trim()) || '',
+      author: (authorEl && authorEl.value.trim()) || '',
+      outline: (outlineEl && outlineEl.value.trim()) || '',
       content: editor ? editor.getValue() : '',
     };
+  }
+
+  /**
+   * 将当前创作页（文章信息 + 大纲 + 正文）写入本地草稿文件，生成/固定 draftFileId。
+   * 发布到服务器前应先调用，否则没有本地索引，远端 ID 难以可靠写回。
+   */
+  async function saveComposeDraftToDisk() {
+    const api = window.markwrite && window.markwrite.api;
+    if (!api || typeof api.composeDraftsSave !== 'function') {
+      return { ok: false, error: '草稿保存不可用（请使用桌面版）' };
+    }
+    if (!composeState.mode) {
+      return { ok: false, error: '请先通过「新建 Blog / 新建书籍」进入创作页' };
+    }
+    const ui = readComposeDraftFromUi();
+    if (composeState.mode === 'book' && !String(ui.author || '').trim()) {
+      return { ok: false, error: '请先填写作者' };
+    }
+    const res = await api.composeDraftsSave({
+      id: composeState.draftFileId || undefined,
+      mode: composeState.mode || 'blog',
+      title: ui.title,
+      tags: composeState.tags.slice(),
+      cover: ui.cover,
+      extra: ui.extra,
+      author: ui.author || '',
+      outline: ui.outline || '',
+      content: ui.content,
+      remoteId: composeState.remoteId || '',
+      assetMap: composeState.assetMap || {},
+    });
+    if (res && res.ok && res.id) {
+      composeState.draftFileId = res.id;
+      return { ok: true, id: res.id };
+    }
+    return { ok: false, error: (res && res.error) || '保存草稿失败' };
   }
 
   function serializeComposeDraftState() {
@@ -255,6 +295,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       title: ui.title,
       cover: ui.cover,
       extra: ui.extra,
+      author: ui.author || '',
+      outline: ui.outline || '',
       content: ui.content,
       tags: composeState.tags.slice(),
       draftFileId: composeState.draftFileId || null,
@@ -441,6 +483,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   const contentComposeTagInput = document.getElementById('content-compose-tag-input');
   const contentComposeTagAdd = document.getElementById('content-compose-tag-add');
   const contentComposeCover = document.getElementById('content-compose-cover');
+  const contentComposeAuthorWrap = document.getElementById('content-compose-author-wrap');
+  const contentComposeAuthor = document.getElementById('content-compose-author');
   const contentComposeExtraWrap = document.getElementById('content-compose-extra-wrap');
   const contentComposeExtra = document.getElementById('content-compose-extra');
   const contentComposeGenerateTags = document.getElementById('content-compose-generate-tags');
@@ -454,6 +498,32 @@ window.addEventListener('DOMContentLoaded', async () => {
   const contentComposeSaveDraft = document.getElementById('content-compose-save-draft');
   const contentComposePublish = document.getElementById('content-compose-publish');
   const contentComposeUploadProgress = document.getElementById('content-compose-upload-progress');
+  const contentComposeBookShell = document.getElementById('content-compose-book-shell');
+  const contentComposeOutline = document.getElementById('content-compose-outline');
+  let bookOutlinePaneInstance = null;
+  function ensureBookOutlinePane() {
+    if (bookOutlinePaneInstance) return bookOutlinePaneInstance;
+    const B = window.BookOutlinePane;
+    if (!B || typeof B.create !== 'function') return null;
+    const tree = document.getElementById('book-outline-tree');
+    const hidden = document.getElementById('content-compose-outline');
+    if (!tree || !hidden) return null;
+    bookOutlinePaneInstance = B.create({
+      hiddenTextarea: hidden,
+      treeContainer: tree,
+      editJsonBtn: document.getElementById('book-outline-edit-json'),
+      addFolderBtn: document.getElementById('book-outline-add-folder'),
+      addChapterBtn: document.getElementById('book-outline-add-chapter'),
+      modal: document.getElementById('book-outline-json-modal'),
+      modalTextarea: document.getElementById('book-outline-json-textarea'),
+      modalError: document.getElementById('book-outline-json-error'),
+      modalApply: document.getElementById('book-outline-json-apply'),
+      renameModal: document.getElementById('book-outline-rename-modal'),
+      renameInput: document.getElementById('book-outline-rename-input'),
+      renameConfirm: document.getElementById('book-outline-rename-confirm'),
+    });
+    return bookOutlinePaneInstance;
+  }
   const paneEditor = document.getElementById('pane-editor');
   // 设置弹窗元素
   const settingsOverlay = document.getElementById('settings-overlay');
@@ -1981,19 +2051,88 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  function syncLeftPaneForCompose(mode) {
+    const pane = document.getElementById('pane-files');
+    const titleEl = document.getElementById('pane-files-title');
+    const actions = document.getElementById('pane-files-actions-explorer');
+    if (!pane) return;
+    const isBook = mode === 'book';
+    if (isBook) {
+      pane.setAttribute('data-book-compose', '1');
+      if (titleEl) titleEl.textContent = '书籍大纲';
+      if (actions) actions.style.display = 'none';
+    } else {
+      pane.removeAttribute('data-book-compose');
+      if (titleEl) titleEl.textContent = 'Files';
+      if (actions) actions.style.display = '';
+    }
+  }
+
+  let bookComposeView = 'info';
+
+  function clearBookComposeView() {
+    bookComposeView = 'info';
+    const pe = document.getElementById('pane-editor');
+    const pf = document.getElementById('pane-files');
+    if (pe) pe.removeAttribute('data-book-view');
+    if (pf) pf.removeAttribute('data-book-view');
+    const navInfo = document.getElementById('book-compose-nav-info');
+    const navEd = document.getElementById('book-compose-nav-editor');
+    if (navInfo) navInfo.classList.toggle('is-active', false);
+    if (navEd) navEd.classList.toggle('is-active', false);
+  }
+
+  function syncBookComposeView(view) {
+    if (view !== 'info' && view !== 'editor') return;
+    bookComposeView = view;
+    const pe = document.getElementById('pane-editor');
+    const pf = document.getElementById('pane-files');
+    if (pe) pe.setAttribute('data-book-view', view);
+    if (pf) pf.setAttribute('data-book-view', view);
+    const navInfo = document.getElementById('book-compose-nav-info');
+    const navEd = document.getElementById('book-compose-nav-editor');
+    if (navInfo) navInfo.classList.toggle('is-active', view === 'info');
+    if (navEd) navEd.classList.toggle('is-active', view === 'editor');
+    if (contentComposeSubtitle && composeState.mode === 'book') {
+      contentComposeSubtitle.textContent =
+        view === 'info'
+          ? '填写封面、标题、作者、标签与简介；左侧切换到「编辑正文」撰写全书内容。'
+          : '撰写全书 Markdown 正文；左侧为大纲树。';
+    }
+    if (editor && window.monaco) {
+      setTimeout(() => {
+        try {
+          editor.layout();
+        } catch (_) {}
+      }, 100);
+    }
+  }
+
   function syncComposeModeUi(mode) {
+    if (contentComposePanel) {
+      contentComposePanel.setAttribute('data-compose-mode', mode === 'book' ? 'book' : 'blog');
+    }
+    syncLeftPaneForCompose(mode);
+    if (contentComposeBookShell) {
+      const showBook = mode === 'book';
+      contentComposeBookShell.style.display = showBook ? 'block' : 'none';
+      contentComposeBookShell.setAttribute('aria-hidden', showBook ? 'false' : 'true');
+    }
     if (mode === 'blog') {
+      clearBookComposeView();
       if (contentComposeTitle) contentComposeTitle.textContent = '创作新博客';
       if (contentComposeSubtitle) contentComposeSubtitle.textContent = '使用下方 Markdown 工具栏与 Monaco 编辑正文';
+      if (contentComposeAuthorWrap) contentComposeAuthorWrap.style.display = 'none';
       if (contentComposeExtraWrap) contentComposeExtraWrap.style.display = 'grid';
       if (contentComposeExtra) contentComposeExtra.placeholder = '博客简介（可选）';
       setFilename('未发布-blog.md');
     } else {
       if (contentComposeTitle) contentComposeTitle.textContent = '创作新书籍';
-      if (contentComposeSubtitle) contentComposeSubtitle.textContent = '编写书籍内容，后续可扩展章节结构';
+      if (contentComposeAuthorWrap) contentComposeAuthorWrap.style.display = 'grid';
       if (contentComposeExtraWrap) contentComposeExtraWrap.style.display = 'grid';
       if (contentComposeExtra) contentComposeExtra.placeholder = '书籍简介（可选）';
       setFilename('未发布-book.md');
+      syncBookComposeView('info');
     }
   }
 
@@ -2018,6 +2157,18 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (contentComposeCover) contentComposeCover.value = d.cover || '';
     renderComposeCoverPreview(d.cover || '');
     if (contentComposeExtra) contentComposeExtra.value = d.extra || '';
+    if (contentComposeAuthor) contentComposeAuthor.value = typeof d.author === 'string' ? d.author : '';
+    if (d.mode === 'book') {
+      const p = ensureBookOutlinePane();
+      const B = window.BookOutlinePane;
+      if (p && B && typeof B.parseOutlineString === 'function') {
+        p.setOutline(B.parseOutlineString(d.outline));
+      } else if (contentComposeOutline) {
+        contentComposeOutline.value = typeof d.outline === 'string' ? d.outline : '';
+      }
+    } else if (contentComposeOutline) {
+      contentComposeOutline.value = typeof d.outline === 'string' ? d.outline : '';
+    }
     if (editor) editor.setValue(typeof d.content === 'string' ? d.content : '');
   }
 
@@ -2046,6 +2197,16 @@ window.addEventListener('DOMContentLoaded', async () => {
     renderComposeTags();
     if (contentComposeCover) contentComposeCover.value = '';
     if (contentComposeExtra) contentComposeExtra.value = '';
+    if (contentComposeAuthor) contentComposeAuthor.value = '';
+    if (mode === 'book') {
+      const p = ensureBookOutlinePane();
+      const B = window.BookOutlinePane;
+      if (p && B && typeof B.defaultOutline === 'function') {
+        p.setOutline(B.defaultOutline());
+      } else if (contentComposeOutline) contentComposeOutline.value = '';
+    } else if (contentComposeOutline) {
+      contentComposeOutline.value = '';
+    }
     renderComposeCoverPreview('');
     setComposeUploadProgress('');
     setComposeGenerateStatus('');
@@ -2078,6 +2239,8 @@ window.addEventListener('DOMContentLoaded', async () => {
       setFilename(prev.filename || null);
       editor.setValue(prev.value || '');
     }
+    syncLeftPaneForCompose(null);
+    clearBookComposeView();
     markEditorBaselineFromCurrent();
   }
 
@@ -2225,6 +2388,8 @@ window.addEventListener('DOMContentLoaded', async () => {
           tags,
           cover: (row && row.cover) ? String(row.cover) : '',
           extra: (row && (row.extra || row.summary)) ? String(row.extra || row.summary) : '',
+          author: '',
+          outline: '',
           content: (row && row.content) ? String(row.content) : '',
           remoteId: remoteIdToSave,
           assetMap: {},
@@ -2442,6 +2607,22 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   if (menuContentNewBlog) menuContentNewBlog.addEventListener('click', () => enterContentCompose('blog'));
   if (menuContentNewBook) menuContentNewBook.addEventListener('click', () => enterContentCompose('book'));
+  const bookComposeNavInfo = document.getElementById('book-compose-nav-info');
+  const bookComposeNavEditor = document.getElementById('book-compose-nav-editor');
+  if (bookComposeNavInfo) {
+    bookComposeNavInfo.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (composeState.mode !== 'book') return;
+      syncBookComposeView('info');
+    });
+  }
+  if (bookComposeNavEditor) {
+    bookComposeNavEditor.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (composeState.mode !== 'book') return;
+      syncBookComposeView('editor');
+    });
+  }
   if (menuContentDraftsBlog) menuContentDraftsBlog.addEventListener('click', () => {
     setComposeDraftFilter('blog');
     openComposeDraftsModal();
@@ -2488,6 +2669,13 @@ window.addEventListener('DOMContentLoaded', async () => {
     void refreshRemoteBlogsList();
   });
   if (contentComposeClose) contentComposeClose.addEventListener('click', exitContentCompose);
+  if (contentComposeCoverPreview && contentComposeCoverFile && contentComposePanel) {
+    contentComposeCoverPreview.addEventListener('click', () => {
+      if (contentComposePanel.style.display === 'none') return;
+      contentComposeCoverFile.click();
+    });
+    contentComposeCoverPreview.style.cursor = 'pointer';
+  }
   if (contentComposeCoverUpload && contentComposeCoverFile) {
     contentComposeCoverUpload.addEventListener('click', () => contentComposeCoverFile.click());
     contentComposeCoverFile.addEventListener('change', async () => {
@@ -2622,33 +2810,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   }
   if (contentComposeSaveDraft) {
     contentComposeSaveDraft.addEventListener('click', async () => {
-      const api = window.markwrite && window.markwrite.api;
-      if (!api || typeof api.composeDraftsSave !== 'function') {
-        showAppAlert('草稿保存不可用（请使用桌面版）');
-        return;
-      }
-      if (!composeState.mode) {
-        showAppAlert('请先通过「新建 Blog / 新建书籍」进入创作页');
-        return;
-      }
-      const ui = readComposeDraftFromUi();
-      const res = await api.composeDraftsSave({
-        id: composeState.draftFileId || undefined,
-        mode: composeState.mode || 'blog',
-        title: ui.title,
-        tags: composeState.tags.slice(),
-        cover: ui.cover,
-        extra: ui.extra,
-        content: ui.content,
-        remoteId: composeState.remoteId || '',
-        assetMap: composeState.assetMap || {},
-      });
-      if (res && res.ok && res.id) {
-        composeState.draftFileId = res.id;
+      const r = await saveComposeDraftToDisk();
+      if (r.ok) {
         markComposeBaselineFromCurrent();
         showAppAlert('草稿已保存');
       } else {
-        showAppAlert((res && res.error) || '保存草稿失败');
+        showAppAlert(r.error || '保存草稿失败');
       }
     });
   }
@@ -2667,11 +2834,23 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (contentComposeMainTitle) contentComposeMainTitle.focus();
         return;
       }
+      if (payload.mode === 'book' && !String(payload.author || '').trim()) {
+        showAppAlert('请先填写作者');
+        if (contentComposeAuthor) contentComposeAuthor.focus();
+        return;
+      }
       (async () => {
         const api = window.markwrite && window.markwrite.api;
         if (!api || typeof api.composeUploadAssetsAndFixPaths !== 'function') {
           console.log('[compose:publish]', payload);
           showAppAlert('发布前图片上传不可用（请使用桌面版）');
+          return;
+        }
+        setComposeUploadProgress('正在保存本地草稿（建立索引）…');
+        const draftFirst = await saveComposeDraftToDisk();
+        if (!draftFirst.ok) {
+          setComposeUploadProgress(`保存草稿失败：${draftFirst.error || '未知错误'}`, 'error');
+          showAppAlert(draftFirst.error || '请先成功保存本地草稿后再发布');
           return;
         }
         activeComposeUploadRequestId = `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2710,25 +2889,16 @@ window.addEventListener('DOMContentLoaded', async () => {
           return;
         }
         if (created.id) composeState.remoteId = created.id;
-        // 写回草稿：记录远端 id + 图片映射，下一次发布可 update 且跳过重复上传
-        if (composeState.draftFileId && typeof api.composeDraftsSave === 'function') {
-          const ui2 = readComposeDraftFromUi();
-          await api.composeDraftsSave({
-            id: composeState.draftFileId,
-            mode: composeState.mode || 'blog',
-            title: ui2.title,
-            tags: composeState.tags.slice(),
-            cover: ui2.cover,
-            extra: ui2.extra,
-            content: ui2.content,
-            remoteId: composeState.remoteId || '',
-            assetMap: composeState.assetMap || {},
-          });
-        }
+        // 写回草稿：记录远端 id + 图片映射（发布前已保存过草稿，此处必有 draftFileId）
+        const postSave = await saveComposeDraftToDisk();
         markComposeBaselineFromCurrent();
         console.log('[compose:publish:success]', next, { uploaded: fixed.uploaded || {}, created });
         setComposeUploadProgress(`发布完成：${uploadedCount} 张图片已上传并替换。`);
-        showAppAlert(`发布成功${created.id ? `（ID: ${created.id}）` : ''}`);
+        let doneMsg = `发布成功${created.id ? `（ID: ${created.id}）` : ''}`;
+        if (!postSave.ok) {
+          doneMsg += `；写回本地草稿失败：${postSave.error || ''}`;
+        }
+        showAppAlert(doneMsg);
       })();
     });
   }

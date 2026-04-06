@@ -1400,6 +1400,9 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
     const mode = p.mode === 'book' ? 'book' : 'blog';
     const title = String(p.title || '').trim();
     if (!title) return { ok: false, message: '标题不能为空' };
+    if (mode === 'book' && !String(p.author || '').trim()) {
+      return { ok: false, message: '作者不能为空' };
+    }
 
     let syncCfg = { servers: [], activeId: null };
     if (fs.existsSync(SYNC_CONFIG_FILE)) {
@@ -1444,6 +1447,8 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       tags: parseTags(p.tags),
       cover: String(p.cover || '').trim(),
       extra: String(p.extra || '').trim(),
+      author: String(p.author || '').trim(),
+      outline: String(p.outline || '').trim(),
       content: typeof p.content === 'string' ? p.content : '',
     };
     const remoteId = typeof p.remoteId === 'string' ? p.remoteId.trim() : '';
@@ -1491,9 +1496,11 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       coverUrl: coverFile,
       extra: normalized.extra,
       summary: normalized.extra,
+      outline: normalized.outline,
       labels: normalized.tags,
       tags: normalized.tags,
     };
+    bookData.author = normalized.author;
     if (remoteId) bookData.bookId = remoteId;
 
     syncEventstoreVendorConfig();
@@ -1832,6 +1839,10 @@ app.whenReady().then(() => {
     try {
       const dir = ensureComposeDraftsDir();
       const p = payload && typeof payload === 'object' ? payload : {};
+      const modeSave = p.mode === 'book' ? 'book' : 'blog';
+      if (modeSave === 'book' && !String(p.author != null ? p.author : '').trim()) {
+        return { ok: false, error: '作者不能为空' };
+      }
       let id = typeof p.id === 'string' && isSafeDraftId(p.id) ? p.id : randomUUID();
       const fp = path.join(dir, `${id}.json`);
       const now = Date.now();
@@ -1867,6 +1878,8 @@ app.whenReady().then(() => {
         tags,
         cover: String(p.cover != null ? p.cover : ''),
         extra: String(p.extra != null ? p.extra : ''),
+        author: String(p.author != null ? p.author : '').slice(0, 200),
+        outline: String(p.outline != null ? p.outline : ''),
         content: typeof p.content === 'string' ? p.content : '',
         remoteId: persistedRemoteId,
         assetMap,
@@ -1893,6 +1906,8 @@ app.whenReady().then(() => {
         tags: normalizeComposeTagsInput(j.tags),
         cover: typeof j.cover === 'string' ? j.cover : '',
         extra: typeof j.extra === 'string' ? j.extra : '',
+        author: typeof j.author === 'string' ? j.author : '',
+        outline: typeof j.outline === 'string' ? j.outline : '',
         content: typeof j.content === 'string' ? j.content : '',
         remoteId: typeof j.remoteId === 'string' ? j.remoteId : '',
         assetMap: (j && typeof j.assetMap === 'object' && j.assetMap) ? j.assetMap : {},

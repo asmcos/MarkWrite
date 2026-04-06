@@ -1,23 +1,34 @@
 /**
  * MarkWrite 浅色主题（在 styles.css 之后加载）
  *
- * 主界面层次由本文件 + CSS 变量统一（zinc 中性色、1px 发丝边框、轻阴影）。
- * tailwind.output.css 仅用于设置页等少量 utility class，并非全站 Tailwind 布局。
+ * 设计：Slate 中性层次；主操作色参考 eventstoreUI（primary #165DFF、蓝→紫渐变按钮、gray-200 描边输入）。
+ * tailwind.output.css 用于设置页等少量组件。
  *
- * 层次：画布 --mw-canvas → 卡片 --mw-surface → 弱区 --mw-surface-muted；边框一律偏淡。
+ * 层次：画布 --mw-canvas → 卡片 --mw-surface → 弱区 --mw-surface-muted。
  */
 html[data-theme="light"] {
   color-scheme: light;
-  --mw-canvas: #f4f4f5;
+  --mw-canvas: #f1f5f9;
   --mw-surface: #ffffff;
-  --mw-surface-muted: #fafafa;
-  --mw-border: #e4e4e7;
-  --mw-border-strong: #d4d4d8;
-  --mw-text: #18181b;
-  --mw-text-secondary: #52525b;
-  --mw-text-muted: #71717a;
-  --mw-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --mw-shadow-card: 0 4px 24px rgba(0, 0, 0, 0.05);
+  --mw-surface-muted: #f8fafc;
+  --mw-border: #e5e7eb;
+  --mw-border-strong: #d1d5db;
+  --mw-text: #0f172a;
+  --mw-text-secondary: #475569;
+  --mw-text-muted: #64748b;
+  /* 链接 / 图标强调：与 eventstore techBlue 系一致 */
+  --mw-accent: #2563eb;
+  --mw-accent-soft: rgba(37, 99, 235, 0.1);
+  --mw-accent-softer: rgba(37, 99, 235, 0.06);
+  /* 主按钮：from-blue-600 to-purple-600（eventstoreUI 常用 CTA） */
+  --mw-primary-from: #2563eb;
+  --mw-primary-to: #9333ea;
+  --mw-primary-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.22), 0 4px 6px -4px rgba(147, 51, 234, 0.12);
+  --mw-input-border: #e5e7eb;
+  --mw-input-focus-ring: 0 0 0 3px rgba(59, 130, 246, 0.22);
+  --mw-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --mw-shadow-card: 0 1px 3px rgba(15, 23, 42, 0.05), 0 8px 28px rgba(15, 23, 42, 0.06);
+  --mw-shadow-float: 0 12px 40px rgba(15, 23, 42, 0.08);
 }
 
 /* ---- Shell: html / body / scrollbars ---- */
@@ -27,20 +38,20 @@ html[data-theme="light"] body {
 }
 html[data-theme="light"] html::-webkit-scrollbar-thumb,
 html[data-theme="light"] body::-webkit-scrollbar-thumb {
-  background: rgba(113, 113, 122, 0.35);
+  background: rgba(100, 116, 139, 0.35);
   border: 1px solid var(--mw-canvas);
 }
 html[data-theme="light"] html::-webkit-scrollbar-thumb:hover,
 html[data-theme="light"] body::-webkit-scrollbar-thumb:hover {
-  background: rgba(82, 82, 91, 0.45);
+  background: rgba(71, 85, 105, 0.45);
 }
 html[data-theme="light"] html {
-  scrollbar-color: rgba(113, 113, 122, 0.4) transparent;
+  scrollbar-color: rgba(100, 116, 139, 0.42) transparent;
 }
 
 /* ---- Titlebar & window chrome ---- */
 html[data-theme="light"] .titlebar {
-  background: var(--mw-surface);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   color: var(--mw-text);
   border-bottom: 1px solid var(--mw-border);
   box-shadow: var(--mw-shadow-xs);
@@ -66,7 +77,7 @@ html[data-theme="light"] .window-btn-close:hover {
 
 /* ---- Menu bar ---- */
 html[data-theme="light"] .menu-bar {
-  background: var(--mw-surface);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border-bottom: 1px solid var(--mw-border);
 }
 html[data-theme="light"] .menu-root-btn {
@@ -149,8 +160,9 @@ html[data-theme="light"] .md-preview-toggle:hover {
   color: var(--mw-text);
 }
 html[data-theme="light"] .md-preview-toggle.is-on {
-  border-color: rgba(14, 165, 233, 0.45);
-  color: #0284c7;
+  border-color: rgba(14, 165, 233, 0.5);
+  color: var(--mw-accent);
+  background: var(--mw-accent-softer);
 }
 html[data-theme="light"] .pane-body {
   background: var(--mw-surface);
@@ -177,19 +189,20 @@ html[data-theme="light"] .tab {
   color: var(--mw-text-muted);
   background-color: var(--mw-surface-muted);
   border: 1px solid var(--mw-border);
+  border-radius: 8px;
 }
 html[data-theme="light"] .tab.active {
   background: var(--mw-surface);
-  border-color: rgba(59, 130, 246, 0.35);
+  border-color: rgba(14, 165, 233, 0.4);
   color: var(--mw-text);
-  box-shadow: var(--mw-shadow-xs);
+  box-shadow: var(--mw-shadow-xs), 0 0 0 1px var(--mw-accent-softer);
 }
 
 html[data-theme="light"] .statusbar {
-  background: var(--mw-surface);
+  background: linear-gradient(0deg, #f8fafc 0%, #ffffff 100%);
   border-top: 1px solid var(--mw-border);
   color: var(--mw-text-muted);
-  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.03);
+  box-shadow: 0 -1px 0 rgba(15, 23, 42, 0.04);
 }
 html[data-theme="light"] .status-pill {
   border: 1px solid var(--mw-border);
@@ -212,7 +225,9 @@ html[data-theme="light"] .file-list-item:hover {
   background: var(--mw-surface-muted);
 }
 html[data-theme="light"] .file-list-item.is-selected {
-  background: rgba(59, 130, 246, 0.08);
+  background: var(--mw-accent-soft);
+  border-radius: 6px;
+  box-shadow: inset 3px 0 0 0 var(--mw-accent);
 }
 html[data-theme="light"] .file-list-item.is-selected .file-name {
   color: var(--mw-text);
@@ -290,7 +305,7 @@ html[data-theme="light"] #md-preview blockquote {
   color: var(--mw-text-muted);
 }
 html[data-theme="light"] #md-preview a {
-  color: #0284c7;
+  color: var(--mw-accent);
 }
 html[data-theme="light"] #md-preview .code-block {
   background: var(--mw-surface-muted);
@@ -353,16 +368,18 @@ html[data-theme="light"] .ai-messages::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.55);
 }
 html[data-theme="light"] .ai-message {
-  background-color: #ffffff;
-  border-color: rgba(148, 163, 184, 0.4);
+  background-color: var(--mw-surface);
+  border-color: var(--mw-border-strong);
+  border-radius: 12px;
+  box-shadow: var(--mw-shadow-xs);
 }
 html[data-theme="light"] .ai-message.user {
-  border-color: rgba(59, 130, 246, 0.45);
-  background: radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), #ffffff);
+  border-color: rgba(14, 165, 233, 0.35);
+  background: linear-gradient(145deg, rgba(240, 249, 255, 0.95), #ffffff);
 }
 html[data-theme="light"] .ai-message.assistant {
-  border-color: rgba(34, 197, 94, 0.45);
-  background: radial-gradient(circle at top left, rgba(34, 197, 94, 0.1), #ffffff);
+  border-color: rgba(16, 185, 129, 0.3);
+  background: linear-gradient(145deg, rgba(236, 253, 245, 0.9), #ffffff);
 }
 html[data-theme="light"] .ai-message-rendered code {
   background: var(--mw-surface-muted);
@@ -374,12 +391,13 @@ html[data-theme="light"] .ai-message-rendered blockquote {
   border-left-color: rgba(148, 163, 184, 0.45);
 }
 html[data-theme="light"] .ai-message-rendered a {
-  color: #0284c7;
+  color: var(--mw-accent);
 }
 html[data-theme="light"] .ai-input-area {
   border: 1px solid var(--mw-border-strong);
   background: var(--mw-surface-muted) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 html[data-theme="light"] #ai-input {
   background: var(--mw-surface-muted) !important;
@@ -402,9 +420,9 @@ html[data-theme="light"] .pill-mode:hover {
   color: var(--mw-text);
 }
 html[data-theme="light"] .pill-mode.active {
-  background: rgba(59, 130, 246, 0.12);
-  border-color: rgba(59, 130, 246, 0.45);
-  color: #1d4ed8;
+  background: var(--mw-accent-soft);
+  border-color: rgba(14, 165, 233, 0.45);
+  color: var(--mw-accent);
 }
 html[data-theme="light"] .ai-model-label {
   color: var(--mw-text-muted);
@@ -426,8 +444,9 @@ html[data-theme="light"] .settings-inline-confirm-overlay {
 html[data-theme="light"] .apply-editor-confirm-box,
 html[data-theme="light"] .settings-inline-confirm-box {
   background: linear-gradient(180deg, #ffffff, var(--mw-surface-muted));
-  border-color: rgba(59, 130, 246, 0.35);
-  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.12);
+  border-color: rgba(14, 165, 233, 0.25);
+  border-radius: 14px;
+  box-shadow: var(--mw-shadow-float);
   color: var(--mw-text);
 }
 html[data-theme="light"] .apply-editor-confirm-desc {
@@ -474,6 +493,9 @@ html[data-theme="light"] .content-compose-close {
 html[data-theme="light"] .content-compose-field > label {
   color: var(--mw-text-secondary);
 }
+html[data-theme="light"] .content-compose-required-mark {
+  color: #dc2626;
+}
 html[data-theme="light"] .content-compose-field input,
 html[data-theme="light"] .content-compose-field textarea {
   border-color: rgba(148, 163, 184, 0.45);
@@ -512,16 +534,176 @@ html[data-theme="light"] .content-compose-generate-status {
   color: var(--mw-text-muted);
 }
 
-html[data-theme="light"] .apply-editor-btn {
-  border-color: rgba(148, 163, 184, 0.45);
+html[data-theme="light"] .content-compose-book-shell {
+  border-color: var(--mw-input-border);
+  background: linear-gradient(165deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: var(--mw-shadow-card);
+}
+html[data-theme="light"] .content-compose-book-banner {
+  border-bottom-color: var(--mw-border);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(147, 51, 234, 0.06));
+}
+html[data-theme="light"] .content-compose-book-banner-glow {
+  background: radial-gradient(circle at 15% 0%, rgba(59, 130, 246, 0.12), transparent 50%);
+}
+html[data-theme="light"] .content-compose-book-banner-icon {
+  background: #ffffff;
+  border-color: rgba(59, 130, 246, 0.25);
+  color: var(--mw-accent);
+}
+html[data-theme="light"] .content-compose-book-banner-title {
   color: var(--mw-text);
-  background: var(--mw-surface-muted);
+}
+html[data-theme="light"] .content-compose-book-banner-desc {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-compose-left-nav {
+  border-bottom-color: var(--mw-border);
+}
+html[data-theme="light"] .book-compose-nav-item {
+  border-color: var(--mw-input-border);
+  background: #ffffff;
+  color: var(--mw-text-secondary);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+html[data-theme="light"] .book-compose-nav-item:hover {
+  border-color: var(--mw-border-strong);
+  background: #f9fafb;
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-compose-nav-item.is-active {
+  border-color: rgba(99, 102, 241, 0.45);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-compose-nav-desc {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-compose-nav-item.is-active .book-compose-nav-desc {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .content-compose-outline-input {
+  border: 1px solid var(--mw-input-border);
+  background: #ffffff;
+  color: var(--mw-text);
+}
+html[data-theme="light"] .content-compose-outline-input:focus {
+  border-color: #3b82f6;
+  box-shadow: var(--mw-input-focus-ring);
+}
+
+html[data-theme="light"] .book-outline-tool-btn {
+  border-color: var(--mw-input-border);
+  background: #ffffff;
+  color: var(--mw-text-secondary);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+html[data-theme="light"] .book-outline-tool-btn:hover {
+  border-color: var(--mw-border-strong);
+  color: var(--mw-text);
+  background: #f9fafb;
+}
+html[data-theme="light"] .book-outline-row:hover {
+  background: rgba(241, 245, 249, 0.95);
+}
+html[data-theme="light"] .book-outline-row.is-selected {
+  background: rgba(99, 102, 241, 0.1);
+  border-left-color: var(--mw-accent);
+}
+html[data-theme="light"] .book-outline-title {
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-outline-action-menu {
+  border-color: var(--mw-input-border);
+  background: #ffffff;
+  box-shadow: var(--mw-shadow-card);
+}
+html[data-theme="light"] .book-outline-action-menu button {
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-outline-action-menu button:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+html[data-theme="light"] .book-outline-json-modal,
+html[data-theme="light"] .book-outline-rename-modal {
+  background: rgba(15, 23, 42, 0.45);
+}
+html[data-theme="light"] .book-outline-json-modal-box,
+html[data-theme="light"] .book-outline-rename-modal-box {
+  border-color: var(--mw-input-border);
+  background: #ffffff;
+  box-shadow: var(--mw-shadow-card);
+}
+html[data-theme="light"] .book-outline-json-modal-head,
+html[data-theme="light"] .book-outline-rename-modal-head {
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-outline-rename-label {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-outline-rename-input {
+  border-color: var(--mw-input-border);
+  background: #f8fafc;
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-outline-rename-input:focus {
+  border-color: #3b82f6;
+  box-shadow: var(--mw-input-focus-ring);
+}
+html[data-theme="light"] .book-outline-json-hint {
+  color: var(--mw-text-muted);
+}
+html[data-theme="light"] .book-outline-json-textarea {
+  border-color: var(--mw-input-border);
+  background: #f8fafc;
+  color: var(--mw-text);
+}
+html[data-theme="light"] .book-outline-json-textarea:focus {
+  border-color: #3b82f6;
+  box-shadow: var(--mw-input-focus-ring);
+}
+
+/* 浅色下全局按钮：对齐 eventstoreUI（灰边次要 / 蓝紫渐变主按钮） */
+html[data-theme="light"] .apply-editor-btn {
+  border-radius: 8px;
+  border: 1px solid var(--mw-input-border);
+  color: var(--mw-text-secondary);
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+html[data-theme="light"] .apply-editor-btn:hover {
+  background: #f9fafb;
+  border-color: var(--mw-border-strong);
+  color: var(--mw-text);
 }
 html[data-theme="light"] .apply-editor-btn-secondary {
-  background: var(--mw-surface-muted);
+  background: #ffffff !important;
+  border: 1px solid var(--mw-input-border) !important;
+  color: var(--mw-text-secondary) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+html[data-theme="light"] .apply-editor-btn-secondary:hover {
+  background: #f9fafb !important;
+  border-color: #d1d5db !important;
+  color: var(--mw-text) !important;
 }
 html[data-theme="light"] .apply-editor-btn-primary {
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border: 1px solid transparent !important;
+  background: linear-gradient(90deg, var(--mw-primary-from), var(--mw-primary-to)) !important;
+  color: #ffffff !important;
+  box-shadow: var(--mw-primary-shadow) !important;
+}
+html[data-theme="light"] .apply-editor-btn-primary:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 12px 20px -3px rgba(37, 99, 235, 0.28), 0 4px 8px -4px rgba(147, 51, 234, 0.18) !important;
+}
+html[data-theme="light"] .apply-editor-btn-primary:focus-visible,
+html[data-theme="light"] .apply-editor-btn-secondary:focus-visible {
+  outline: none;
+  box-shadow: var(--mw-input-focus-ring);
+}
+html[data-theme="light"] .apply-editor-btn-primary:focus-visible {
+  box-shadow: var(--mw-primary-shadow), var(--mw-input-focus-ring) !important;
 }
 
 /* ---- Compose drafts overlay ---- */
@@ -654,19 +836,21 @@ html[data-theme="light"] .remote-blogs-page {
 
 /* ---- Settings overlay & shell (styles.css) ---- */
 html[data-theme="light"] .settings-overlay {
-  background: rgba(15, 23, 42, 0.35);
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(6px);
 }
 html[data-theme="light"] .settings-box {
-  background: var(--mw-surface);
+  background: linear-gradient(165deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid var(--mw-border);
-  box-shadow: var(--mw-shadow-card);
+  border-radius: 16px;
+  box-shadow: var(--mw-shadow-float);
   color: var(--mw-text);
 }
 html[data-theme="light"] .settings-close-btn {
   color: var(--mw-text-muted);
 }
 html[data-theme="light"] .settings-close-btn:hover {
-  background: rgba(59, 130, 246, 0.12);
+  background: var(--mw-accent-soft);
   color: var(--mw-text);
 }
 html[data-theme="light"] .settings-nav {
@@ -689,12 +873,12 @@ html[data-theme="light"] .settings-tab:hover .settings-tab-icon {
   color: var(--mw-text-muted);
 }
 html[data-theme="light"] .settings-tab.active {
-  background: rgba(59, 130, 246, 0.1);
-  border-left-color: #2563eb;
+  background: var(--mw-accent-soft);
+  border-left-color: var(--mw-accent);
   color: var(--mw-text);
 }
 html[data-theme="light"] .settings-tab.active .settings-tab-icon {
-  color: #2563eb;
+  color: var(--mw-accent);
 }
 html[data-theme="light"] .settings-section-title {
   color: var(--mw-text);
@@ -709,13 +893,14 @@ html[data-theme="light"] .settings-theme-saved-hint:not(:empty) {
  * 与 renderer 的 .is-theme-active 同步，仅作用于未选中按钮。
  */
 html[data-theme="light"] #settings-overlay .settings-theme-toggle:not(.is-theme-active) {
-  border: 2px solid var(--mw-text-muted);
+  border: 2px solid var(--mw-input-border);
   background-color: var(--mw-surface-muted);
   color: var(--mw-text-muted);
-  box-shadow: none;
+  box-shadow: var(--mw-shadow-xs);
+  border-radius: 1rem;
 }
 html[data-theme="light"] #settings-overlay .settings-theme-toggle:not(.is-theme-active):hover {
-  border-color: var(--mw-text-secondary);
+  border-color: var(--mw-text-muted);
   background-color: var(--mw-surface);
   color: var(--mw-text-secondary);
 }
@@ -760,9 +945,19 @@ html[data-theme="light"] .settings-field label {
 html[data-theme="light"] .settings-field input,
 html[data-theme="light"] .settings-field select,
 html[data-theme="light"] .settings-field textarea {
-  border-color: rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  border: 1px solid var(--mw-input-border);
   background: #ffffff;
   color: var(--mw-text);
+  padding: 8px 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+html[data-theme="light"] .settings-field input:not([readonly]):focus,
+html[data-theme="light"] .settings-field textarea:not([readonly]):focus,
+html[data-theme="light"] .settings-field select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: var(--mw-input-focus-ring);
 }
 html[data-theme="light"] .settings-hint {
   color: var(--mw-text-muted);
@@ -825,9 +1020,16 @@ html[data-theme="light"] .table-size-box .table-size-row label {
   color: var(--mw-text-muted);
 }
 html[data-theme="light"] .table-size-box .table-size-row input {
-  border-color: rgba(148, 163, 184, 0.45);
+  border: 1px solid var(--mw-input-border);
+  border-radius: 8px;
   background: #ffffff;
   color: var(--mw-text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+html[data-theme="light"] .table-size-box .table-size-row input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: var(--mw-input-focus-ring);
 }
 
 /* ---- settings-modal.html 内联卡片（登录 / 用户信息） ---- */
@@ -923,13 +1125,22 @@ html[data-theme="light"] #settings-identity-privkey::placeholder {
   color: var(--mw-text-muted) !important;
 }
 
-/* 设置弹窗内：统一浅色输入（ESEC 文本域除外，避免盖住专用背景） */
+/* 设置弹窗内：统一浅色输入（eventstore 风：白底 gray-200 框 + focus ring） */
 html[data-theme="light"] #settings-overlay input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]),
 html[data-theme="light"] #settings-overlay textarea:not(#settings-identity-privkey),
 html[data-theme="light"] #settings-overlay select {
-  background-color: var(--mw-surface-muted) !important;
+  border-radius: 8px !important;
+  background-color: #ffffff !important;
   color: var(--mw-text) !important;
-  border-color: var(--mw-border-strong) !important;
+  border: 1px solid var(--mw-input-border) !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+html[data-theme="light"] #settings-overlay input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]):not([type="reset"]):focus,
+html[data-theme="light"] #settings-overlay textarea:not(#settings-identity-privkey):focus,
+html[data-theme="light"] #settings-overlay select:focus {
+  outline: none !important;
+  border-color: #3b82f6 !important;
+  box-shadow: var(--mw-input-focus-ring) !important;
 }
 html[data-theme="light"] #settings-overlay select option {
   background-color: #ffffff;
@@ -1037,46 +1248,53 @@ html[data-theme="light"] #settings-identity-key-section [class*="border-amber"] 
 
 /* 创作区标签输入框 */
 html[data-theme="light"] .content-compose-tag-input {
-  background: var(--mw-surface-muted) !important;
-  border-color: var(--mw-border-strong) !important;
+  background: #ffffff !important;
+  border: 1px solid var(--mw-input-border) !important;
+  border-radius: 8px !important;
   color: var(--mw-text) !important;
+}
+html[data-theme="light"] .content-compose-tag-input:focus {
+  outline: none !important;
+  border-color: #3b82f6 !important;
+  box-shadow: var(--mw-input-focus-ring) !important;
 }
 html[data-theme="light"] .content-compose-tag-input::placeholder {
   color: var(--mw-text-muted) !important;
 }
 
-/* settings-modal 内联里的次要按钮（深底浅字）→ 浅色可读 */
+/* settings-modal 次要按钮：与 eventstore 灰边一致 */
 html[data-theme="light"] #settings-overlay .apply-editor-btn-secondary {
   color: var(--mw-text-secondary) !important;
-  background: var(--mw-surface) !important;
-  border: 1px solid var(--mw-border) !important;
+  background: #ffffff !important;
+  border: 1px solid var(--mw-input-border) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
 }
 html[data-theme="light"] #settings-overlay .apply-editor-btn-secondary:hover {
-  background: var(--mw-canvas) !important;
-  border-color: var(--mw-border-strong) !important;
+  background: #f9fafb !important;
+  border-color: #d1d5db !important;
   color: var(--mw-text) !important;
 }
 
 /* 登录/注册卡片底部操作行（不含 Tab 切换） */
 html[data-theme="light"] #settings-identity-key-section .settings-identity-actions-row .apply-editor-btn-primary {
-  background: linear-gradient(180deg, #3b82f6, #2563eb) !important;
-  border: 1px solid #1d4ed8 !important;
+  background: linear-gradient(90deg, var(--mw-primary-from), var(--mw-primary-to)) !important;
+  border: 1px solid transparent !important;
   color: #ffffff !important;
-  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.22) !important;
+  box-shadow: var(--mw-primary-shadow) !important;
 }
 html[data-theme="light"] #settings-identity-key-section .settings-identity-actions-row .apply-editor-btn-primary:hover {
-  filter: brightness(1.04);
-  border-color: #1e40af !important;
+  filter: brightness(1.05);
+  box-shadow: 0 12px 20px -3px rgba(37, 99, 235, 0.28), 0 4px 8px -4px rgba(147, 51, 234, 0.18) !important;
 }
 html[data-theme="light"] #settings-identity-key-section .settings-identity-actions-row .apply-editor-btn-secondary:not(#settings-identity-logout-btn) {
   background: #ffffff !important;
   color: var(--mw-text-secondary) !important;
-  border: 1px solid var(--mw-border-strong) !important;
-  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+  border: 1px solid var(--mw-input-border) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 html[data-theme="light"] #settings-identity-key-section .settings-identity-actions-row .apply-editor-btn-secondary:not(#settings-identity-logout-btn):hover {
-  background: var(--mw-surface-muted) !important;
-  border-color: var(--mw-text-muted) !important;
+  background: #f9fafb !important;
+  border-color: #d1d5db !important;
   color: var(--mw-text) !important;
 }
 html[data-theme="light"] #settings-identity-logout-btn {
