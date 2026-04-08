@@ -2885,29 +2885,23 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
 .md-toolbar-btn:active {
   background: rgba(56, 189, 248, 0.35);
 }
-.md-toolbar-btn-book-save,
-.md-toolbar-sep-book-save {
-  display: none;
-}
-.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-btn-book-save,
-.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-sep-book-save {
-  display: inline-flex;
-}
-.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-btn-book-save {
-  border: 1px solid rgba(129, 140, 248, 0.7);
-  color: #c7d2fe;
-  background: rgba(79, 70, 229, 0.2);
-}
-.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-btn-book-save:hover {
-  border-color: rgba(165, 180, 252, 0.9);
-  background: rgba(79, 70, 229, 0.35);
-  color: #e0e7ff;
-}
 .md-toolbar-sep {
   width: 1px;
   height: 18px;
   background: rgba(148, 163, 184, 0.35);
   margin: 0 2px;
+}
+.book-chapter-save-row {
+  display: none;
+  width: 100%;
+  margin-top: 20px;
+  justify-content: flex-end;
+}
+.book-chapter-save-row .apply-editor-btn {
+  min-width: 126px;
+}
+.pane-editor[data-compose-open='1'][data-book-view='editor'] .book-chapter-save-row {
+  display: flex;
 }
 /* Monaco 编辑区；预览为覆盖层 overlay */
 .editor-with-preview {

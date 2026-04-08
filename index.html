@@ -215,10 +215,6 @@
           <div class="editor-with-preview" id="editor-with-preview" data-preview="closed">
             <div class="md-editor-column">
               <div class="md-toolbar">
-                <button type="button" class="md-toolbar-btn md-toolbar-btn-book-save" id="book-chapter-save-draft" title="保存本书草稿">
-                  <i class="bi bi-save"></i>
-                </button>
-                <span class="md-toolbar-sep md-toolbar-sep-book-save"></span>
                 <button type="button" class="md-toolbar-btn" id="md-bold" title="Bold"><i class="bi bi-type-bold"></i></button>
                 <button type="button" class="md-toolbar-btn" id="md-italic" title="Italic"><i class="bi bi-type-italic"></i></button>
                 <button type="button" class="md-toolbar-btn" id="md-strike" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
@@ -254,6 +250,11 @@
               </div>
               <div id="md-preview" class="md-preview-body">预览将显示在这里…</div>
             </div>
+          </div>
+          <div class="book-chapter-save-row" id="book-chapter-save-row">
+            <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="book-chapter-save-draft">
+              <i class="bi bi-save"></i> 保存内容
+            </button>
           </div>
           <div id="content-compose-bottom-host"></div>
         </div>
