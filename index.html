@@ -156,7 +156,7 @@
                     id="book-outline-save-draft"
                     title="将书籍信息、大纲与正文保存到本地草稿箱"
                   >
-                    <i class="bi bi-save"></i> 保存草稿
+                    <i class="bi bi-save"></i> 保存大纲
                   </button>
                 </div>
                 <div class="book-outline-toolbar-row book-outline-toolbar-row--pair">
@@ -210,77 +210,15 @@
                 </button>
               </div>
             </div>
-            <div id="book-compose-info-block" class="book-compose-info-block">
-              <div class="content-compose-grid content-compose-grid--top">
-                <div class="content-compose-field">
-                  <label for="content-compose-main-title">标题</label>
-                  <input id="content-compose-main-title" type="text" placeholder="请输入标题" maxlength="120" />
-                </div>
-                <div class="content-compose-field content-compose-cover-field">
-                  <label>封面（正方形）</label>
-                  <div class="content-compose-cover-row">
-                    <div class="content-compose-cover-preview" id="content-compose-cover-preview" title="点击上传或截图粘贴封面">
-                      <i class="bi bi-image"></i>
-                    </div>
-                    <div class="content-compose-cover-side">
-                      <div class="content-compose-cover-actions">
-                        <button type="button" class="content-compose-mini-btn" id="content-compose-cover-upload">上传图片</button>
-                        <button type="button" class="content-compose-mini-btn" id="content-compose-cover-screenshot">截图粘贴</button>
-                      </div>
-                      <p class="content-compose-cover-hint">仅支持上传或剪贴板截图，预览为居中裁剪的正方形。</p>
-                      <input id="content-compose-cover-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />
-                      <input type="hidden" id="content-compose-cover" value="" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <!-- 书籍模式：eventstoreUI 风格说明卡片 -->
-              <div
-                class="content-compose-book-shell"
-                id="content-compose-book-shell"
-                style="display:none;"
-                aria-hidden="true"
-              >
-                <div class="content-compose-book-banner">
-                  <div class="content-compose-book-banner-glow" aria-hidden="true"></div>
-                  <span class="content-compose-book-banner-icon" aria-hidden="true"
-                    ><i class="bi bi-book-half"></i
-                  ></span>
-                  <div class="content-compose-book-banner-text">
-                    <div class="content-compose-book-banner-title">创建书籍</div>
-                    <p class="content-compose-book-banner-desc" id="content-compose-book-banner-desc">
-                      在左侧切换「编辑正文」可编辑大纲与全书正文；本页填写封面、作者与标签。
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div id="book-compose-upload-block" class="book-compose-upload-block" style="display: none" aria-hidden="true">
-              <p class="book-upload-intro">
-                对比本地文件修改时间与上次成功上传时记录的时间；<strong>待上传</strong>表示该部分自上次上传后有变更。可<strong>勾选分项</strong>后点「上传选中项」，或点「全部上传」；也可在各行点<strong>上传</strong>只发该项。服务器仍为整书
-                <code>create_book</code> / <code>update_book</code>，每次上传都会提交当前合并后的全书内容。
-              </p>
-              <div id="book-upload-legacy-hint" class="book-upload-legacy-hint" style="display: none" role="status"></div>
-              <div class="book-upload-toolbar">
-                <button type="button" class="content-compose-mini-btn" id="book-upload-refresh" title="重新读取本地与同步状态">
-                  <i class="bi bi-arrow-clockwise"></i> 刷新状态
-                </button>
-                <button type="button" class="apply-editor-btn apply-editor-btn-secondary" id="book-upload-selected">
-                  上传选中项
-                </button>
-                <button type="button" class="apply-editor-btn apply-editor-btn-primary" id="book-upload-all">全部上传</button>
-              </div>
-              <div id="book-upload-remote-line" class="book-upload-remote-line"></div>
-              <ul id="book-upload-parts-list" class="book-upload-parts-list" aria-label="上传分项"></ul>
-              <p id="book-upload-no-draft" class="book-upload-no-draft" style="display: none">
-                请先点击「保存草稿」生成本地目录草稿后再上传。
-              </p>
-              <div id="book-upload-panel-progress" class="content-compose-upload-progress" style="display: none"></div>
-            </div>
+            <div id="content-compose-top-host"></div>
           </div>
           <div class="editor-with-preview" id="editor-with-preview" data-preview="closed">
             <div class="md-editor-column">
               <div class="md-toolbar">
+                <button type="button" class="md-toolbar-btn md-toolbar-btn-book-save" id="book-chapter-save-draft" title="保存本书草稿">
+                  <i class="bi bi-save"></i>
+                </button>
+                <span class="md-toolbar-sep md-toolbar-sep-book-save"></span>
                 <button type="button" class="md-toolbar-btn" id="md-bold" title="Bold"><i class="bi bi-type-bold"></i></button>
                 <button type="button" class="md-toolbar-btn" id="md-italic" title="Italic"><i class="bi bi-type-italic"></i></button>
                 <button type="button" class="md-toolbar-btn" id="md-strike" title="Strikethrough"><i class="bi bi-type-strikethrough"></i></button>
@@ -317,61 +255,7 @@
               <div id="md-preview" class="md-preview-body">预览将显示在这里…</div>
             </div>
           </div>
-          <div class="content-compose-bottom-tools" id="content-compose-bottom-tools">
-            <div id="content-compose-meta-tools" class="content-compose-meta-tools">
-              <div class="content-compose-field" id="content-compose-author-wrap">
-                <label for="content-compose-author">书籍作者<span class="content-compose-required-mark" aria-hidden="true"> *</span></label>
-                <input
-                  type="text"
-                  id="content-compose-author"
-                  placeholder="请输入作者署名"
-                  maxlength="120"
-                  autocomplete="off"
-                  aria-required="true"
-                />
-              </div>
-              <div class="content-compose-field" id="content-compose-coauthors-wrap">
-                <label id="content-compose-coauthors-label">联合作者</label>
-                <div id="content-compose-coauthors-list" class="content-compose-coauthors-list" aria-labelledby="content-compose-coauthors-label"></div>
-                <div id="content-compose-coauthors-input-row" class="content-compose-coauthors-input-row" style="display: none">
-                  <input
-                    type="text"
-                    id="content-compose-coauthor-input"
-                    class="content-compose-coauthor-input"
-                    placeholder="邮箱或公钥（hex / epub1）"
-                    maxlength="500"
-                    autocomplete="off"
-                  />
-                  <button type="button" class="content-compose-mini-btn" id="content-compose-coauthor-add">添加</button>
-                  <button type="button" class="content-compose-mini-btn" id="content-compose-coauthor-cancel">取消</button>
-                </div>
-                <button type="button" class="content-compose-coauthors-show-btn" id="content-compose-coauthor-show">
-                  <i class="bi bi-person-plus" aria-hidden="true"></i> 添加联合作者
-                </button>
-              </div>
-              <div class="content-compose-field">
-                <label for="content-compose-tag-input">标签</label>
-                <div class="content-compose-tags-editor">
-                  <div class="content-compose-tags-list" id="content-compose-tags-list"></div>
-                  <div class="content-compose-tags-add-row">
-                    <input
-                      type="text"
-                      id="content-compose-tag-input"
-                      class="content-compose-tag-input"
-                      placeholder="输入标签，回车或点击添加"
-                      maxlength="32"
-                      autocomplete="off"
-                    />
-                    <button type="button" class="content-compose-mini-btn" id="content-compose-tag-add">添加</button>
-                  </div>
-                </div>
-                <input type="hidden" id="content-compose-tags" value="" />
-              </div>
-            </div>
-            <div id="content-compose-actions-footer" class="content-compose-actions-footer">
-              <div class="content-compose-upload-progress" id="content-compose-upload-progress" style="display:none;"></div>
-            </div>
-          </div>
+          <div id="content-compose-bottom-host"></div>
         </div>
       </div>
 

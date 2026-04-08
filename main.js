@@ -1873,7 +1873,15 @@ app.whenReady().then(() => {
     return dir;
   }
   function isSafeDraftId(id) {
-    return typeof id === 'string' && /^[0-9a-f-]{36}$/i.test(id);
+    if (typeof id !== 'string') return false;
+    const t = id.trim();
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return true;
+    if (t.length < 4 || t.length > 200) return false;
+    if (t === '.' || t === '..') return false;
+    if (/[\/\\:\*\?"<>\|\x00-\x1f]/.test(t)) return false;
+    if (/^\s|\s$/.test(t) || /[. ]$/.test(t)) return false;
+    if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(t)) return false;
+    return true;
   }
   const BOOK_META_FILE = 'meta.json';
   const BOOK_OUTLINE_FILE = 'outline.json';

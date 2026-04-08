@@ -1,0 +1,76 @@
+<div class="compose-blog-root" data-compose-template="blog">
+  <div data-compose-slot="top">
+    <div id="content-compose-info-block" class="content-compose-info-block book-compose-info-block">
+      <div class="content-compose-grid content-compose-grid--top">
+        <div class="content-compose-field">
+          <label for="content-compose-main-title">标题</label>
+          <input id="content-compose-main-title" type="text" placeholder="请输入标题" maxlength="120" />
+        </div>
+        <div class="content-compose-field content-compose-cover-field">
+          <label>封面（正方形）</label>
+          <div class="content-compose-cover-row">
+            <div class="content-compose-cover-preview" id="content-compose-cover-preview" title="点击上传或截图粘贴封面">
+              <i class="bi bi-image"></i>
+            </div>
+            <div class="content-compose-cover-side">
+              <div class="content-compose-cover-actions">
+                <button type="button" class="content-compose-mini-btn" id="content-compose-cover-upload">上传图片</button>
+                <button type="button" class="content-compose-mini-btn" id="content-compose-cover-screenshot">截图粘贴</button>
+              </div>
+              <p class="content-compose-cover-hint">仅支持上传或剪贴板截图，预览为居中裁剪的正方形。</p>
+              <input id="content-compose-cover-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;" />
+              <input type="hidden" id="content-compose-cover" value="" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div data-compose-slot="bottom">
+    <div class="content-compose-bottom-tools compose-blog-bottom-tools" id="content-compose-bottom-tools">
+      <div id="content-compose-meta-tools" class="content-compose-meta-tools">
+        <div class="content-compose-field">
+          <div class="content-compose-label-row">
+            <label for="content-compose-tag-input">标签</label>
+          </div>
+          <div class="content-compose-tags-editor">
+            <div class="content-compose-tags-list" id="content-compose-tags-list"></div>
+            <div class="content-compose-tags-add-row">
+              <input
+                type="text"
+                id="content-compose-tag-input"
+                class="content-compose-tag-input"
+                placeholder="输入标签，回车或点击添加"
+                maxlength="32"
+                autocomplete="off"
+              />
+              <button type="button" class="content-compose-mini-btn" id="content-compose-tag-add">添加</button>
+            </div>
+          </div>
+          <input type="hidden" id="content-compose-tags" value="" />
+        </div>
+        <div class="content-compose-field" id="content-compose-extra-wrap">
+          <label for="content-compose-extra">简介</label>
+          <textarea
+            id="content-compose-extra"
+            placeholder="输入或点击“生成简介”自动生成内容"
+            maxlength="500"
+            autocomplete="off"
+          ></textarea>
+        </div>
+        <div class="content-compose-generate-row" aria-label="标签与简介生成">
+          <div class="content-compose-generate-actions">
+            <button type="button" class="content-compose-mini-btn content-compose-ai-mini-btn" id="content-compose-generate-tags">生成标签</button>
+            <button type="button" class="content-compose-mini-btn content-compose-ai-mini-btn" id="content-compose-generate-summary">生成简介</button>
+            <span class="content-compose-generate-note">AI自动生成，仅作草稿参考</span>
+            <span id="content-compose-generate-status" class="content-compose-generate-status" style="display:none;"></span>
+          </div>
+        </div>
+        <div id="compose-blog-actions-slot" class="compose-blog-actions-slot"></div>
+      </div>
+      <div id="content-compose-actions-footer" class="content-compose-actions-footer">
+        <div class="content-compose-upload-progress" id="content-compose-upload-progress" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+</div>

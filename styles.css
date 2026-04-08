@@ -336,6 +336,33 @@ body {
   gap: 10px;
 }
 
+/* 警告类确认（覆盖草稿等）：黄框 + 标题旁警告图标 */
+.settings-inline-confirm-overlay--warning {
+  background: rgba(0, 0, 0, 0.52);
+}
+.settings-inline-confirm-box--warning {
+  border-color: rgba(251, 191, 36, 0.5);
+  background: linear-gradient(180deg, rgba(35, 28, 12, 0.98), rgba(15, 12, 8, 0.98));
+  box-shadow:
+    0 16px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(251, 191, 36, 0.1);
+}
+.settings-inline-confirm-title--warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #fbbf24;
+}
+.settings-inline-confirm-warn-ic {
+  flex-shrink: 0;
+  font-size: 16px;
+  color: #fbbf24;
+  opacity: 0.95;
+}
+.settings-inline-confirm-box--warning .settings-inline-confirm-desc {
+  color: rgba(254, 243, 199, 0.88);
+}
+
 .content-compose-panel {
   margin-bottom: 10px;
   border: 1px solid rgba(71, 85, 105, 0.45);
@@ -365,6 +392,19 @@ body {
 }
 .content-compose-panel[data-compose-mode='blog'] #content-compose-head-actions {
   display: flex;
+}
+.compose-blog-actions-slot {
+  width: 100%;
+}
+.compose-blog-actions-slot #content-compose-head-actions {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  margin-top: 4px;
+}
+.compose-blog-actions-slot #content-compose-head-actions .apply-editor-btn {
+  min-height: 30px;
+  border-radius: 10px;
 }
 .content-compose-title { margin: 0; color: #e2e8f0; font-size: 14px; }
 .content-compose-subtitle { margin: 4px 0 0; color: #94a3b8; font-size: 12px; }
@@ -647,11 +687,26 @@ body {
 .content-compose-meta-tools {
   display: contents;
 }
-/* 书籍：显示作者与联合作者；博客：隐藏 */
+/* 书籍：作者与联合作者；博客：整块不展示（作者由发布端生成） */
+.content-compose-panel #content-compose-book-author-meta {
+  display: none;
+}
+.content-compose-panel.compose-book-root #content-compose-book-author-meta,
+.content-compose-panel[data-compose-mode='book'] #content-compose-book-author-meta {
+  display: contents;
+}
+.content-compose-panel.compose-blog-root #content-compose-book-author-meta,
+.content-compose-panel[data-compose-mode='blog'] #content-compose-book-author-meta {
+  display: none !important;
+}
+.content-compose-panel.compose-blog-root #content-compose-author-wrap,
+.content-compose-panel.compose-blog-root #content-compose-coauthors-wrap,
 .content-compose-panel[data-compose-mode='blog'] #content-compose-author-wrap,
 .content-compose-panel[data-compose-mode='blog'] #content-compose-coauthors-wrap {
   display: none !important;
 }
+.content-compose-panel.compose-book-root #content-compose-author-wrap,
+.content-compose-panel.compose-book-root #content-compose-coauthors-wrap,
 .content-compose-panel[data-compose-mode='book'] #content-compose-author-wrap,
 .content-compose-panel[data-compose-mode='book'] #content-compose-coauthors-wrap {
   display: grid;
@@ -741,6 +796,39 @@ body {
   display: block;
   width: 100%;
 }
+/* 书籍信息区块内：仅书籍模式显示（博客模式隐藏）；与「编辑正文」页大纲内保存草稿互为补充 */
+.book-compose-info-save-row {
+  display: none;
+  width: 100%;
+  padding: 10px 12px 4px;
+  box-sizing: border-box;
+  justify-content: flex-end;
+}
+.book-compose-info-save-row .apply-editor-btn {
+  width: auto;
+  min-width: 148px;
+  justify-content: center;
+  padding: 7px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(129, 140, 248, 0.75);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.5), rgba(79, 70, 229, 0.42));
+  color: #eef2ff;
+  box-shadow: 0 0 0 1px rgba(129, 140, 248, 0.25), 0 6px 18px rgba(79, 70, 229, 0.25);
+}
+.book-compose-info-save-row .apply-editor-btn:hover {
+  border-color: rgba(165, 180, 252, 0.9);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.62), rgba(79, 70, 229, 0.55));
+  color: #ffffff;
+}
+.compose-book-bottom-tools .book-compose-info-save-row,
+.pane-editor[data-compose-open='1'][data-book-view='info'] .book-compose-info-save-row {
+  display: flex;
+}
+.compose-blog-bottom-tools .book-compose-info-save-row,
+.pane-editor[data-compose-open='1'][data-book-view='editor'] .book-compose-info-save-row,
+.pane-editor[data-compose-open='1'][data-book-view='upload'] .book-compose-info-save-row {
+  display: none !important;
+}
 .pane-editor[data-compose-open='1'][data-book-view='editor'] #content-compose-meta-tools {
   display: none !important;
 }
@@ -748,7 +836,7 @@ body {
 .pane-editor[data-compose-open='1'][data-book-view='upload'] .editor-with-preview {
   display: none !important;
 }
-.pane-editor[data-compose-open='1'][data-book-view='upload'] #book-compose-info-block {
+.pane-editor[data-compose-open='1'][data-book-view='upload'] #content-compose-info-block {
   display: none !important;
 }
 .pane-editor[data-compose-open='1'][data-book-view='upload'] #book-compose-upload-block {
@@ -881,7 +969,7 @@ body {
   font-size: 12px;
   color: #f87171;
 }
-.pane-editor[data-compose-open='1'][data-book-view='editor'] #book-compose-info-block {
+.pane-editor[data-compose-open='1'][data-book-view='editor'] #content-compose-info-block {
   display: none !important;
 }
 .pane-editor[data-compose-open='1'][data-book-view='editor'] .pane-body {
@@ -916,8 +1004,20 @@ body {
   align-items: center;
   gap: 8px;
 }
+.content-compose-generate-row {
+  margin-top: 2px;
+}
+.content-compose-ai-mini-btn {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+}
+.content-compose-generate-note {
+  font-size: 11px;
+  color: #94a3b8;
+}
 .content-compose-generate-status {
-  margin-left: auto;
+  margin-left: 4px;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1359,8 +1459,10 @@ body {
   border-radius: 8px;
   border: 1px solid rgba(71, 85, 105, 0.45);
   background: rgba(15, 23, 42, 0.5);
-  max-height: 180px;
+  max-height: 240px;
   overflow: auto;
+  overflow-anchor: none;
+  scroll-behavior: auto;
 }
 .remote-books-download-panel-title {
   font-size: 11px;
@@ -2051,6 +2153,10 @@ body:not([data-explorer-hidden='1']) .app-container:has(.pane-files[data-book-co
 .book-outline-tool-btn:hover {
   border-color: rgba(59, 130, 246, 0.65);
   color: #e2e8f0;
+}
+#book-outline-save-draft.is-dirty {
+  border-color: rgba(96, 165, 250, 0.9) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2) !important;
 }
 .book-outline-tree {
   flex: 1;
@@ -2779,6 +2885,24 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
 .md-toolbar-btn:active {
   background: rgba(56, 189, 248, 0.35);
 }
+.md-toolbar-btn-book-save,
+.md-toolbar-sep-book-save {
+  display: none;
+}
+.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-btn-book-save,
+.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-sep-book-save {
+  display: inline-flex;
+}
+.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-btn-book-save {
+  border: 1px solid rgba(129, 140, 248, 0.7);
+  color: #c7d2fe;
+  background: rgba(79, 70, 229, 0.2);
+}
+.pane-editor[data-compose-open='1'][data-book-view='editor'] .md-toolbar-btn-book-save:hover {
+  border-color: rgba(165, 180, 252, 0.9);
+  background: rgba(79, 70, 229, 0.35);
+  color: #e0e7ff;
+}
 .md-toolbar-sep {
   width: 1px;
   height: 18px;
@@ -3332,7 +3456,7 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
 }
 .apply-editor-btn-secondary {
   background: rgba(100, 120, 140, 0.2);
-  border: 1px solid #4b5e72;
+  border: 1px solid #6b7fd6;
   border-radius: 2rem;
   padding: 0.5rem 1.2rem;
   font-weight: 500;
@@ -3342,5 +3466,5 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
 }
 .apply-editor-btn-secondary:hover {
   background: rgba(100, 120, 140, 0.4);
-  border-color: #7c9bbe;
+  border-color: #8fa3ff;
 }
