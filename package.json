@@ -1,6 +1,6 @@
 {
   "name": "markwrite",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "MarkWrite - A local-first Markdown desktop app with AI-assisted writing, built on Electron.",
   "main": "main.js",
   "scripts": {

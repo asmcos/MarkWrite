@@ -2156,36 +2156,6 @@ app.whenReady().then(() => {
       if (Array.isArray(it.children)) walkOutlineChapterTitles(it.children, out);
     });
   }
-  function partDirtyUpload(localMs, syncedMs) {
-    if (!localMs || localMs <= 0) return false;
-    if (syncedMs == null || Number(syncedMs) <= 0) return true;
-    return Math.abs(Number(localMs) - Number(syncedMs)) > 0.5;
-  }
-
-  function sha256Utf8(s) {
-    return createHash('sha256').update(String(s ?? ''), 'utf8').digest('hex');
-  }
-
-  /** 与 `update_book` 相关的 meta 字段；排除 updatedAt、assetMap 等纯本地项，避免无关变更误判为待上传 */
-  function bookMetaUploadFingerprint(meta) {
-    if (!meta || typeof meta !== 'object') return '';
-    const o = {
-      title: String(meta.title || ''),
-      tags: Array.isArray(meta.tags) ? meta.tags : [],
-      cover: String(meta.cover || ''),
-      extra: String(meta.extra || ''),
-      author: String(meta.author || ''),
-      coAuthors: Array.isArray(meta.coAuthors)
-        ? meta.coAuthors.map((c) => ({
-            email: typeof c.email === 'string' ? c.email : '',
-            pubkey: typeof c.pubkey === 'string' ? c.pubkey : '',
-          }))
-        : [],
-      remoteId: String(meta.remoteId || ''),
-    };
-    return sha256Utf8(JSON.stringify(o));
-  }
-
   function fileContentSha256(fp) {
     try {
       if (!fp || !fs.existsSync(fp) || !fs.statSync(fp).isFile()) return '';
@@ -2195,15 +2165,17 @@ app.whenReady().then(() => {
     }
   }
 
-  /**
-   * 已记录内容指纹时按内容比较；否则回退 mtime（兼容旧 book-upload-sync.json）
-   */
-  function partDirtyByContentOrMtime(currentHex, syncedHex, localMs, syncedMs) {
-    if (typeof syncedHex === 'string' && /^[a-f0-9]{64}$/i.test(syncedHex)) {
-      if (!currentHex) return true;
-      return currentHex !== syncedHex;
-    }
-    return partDirtyUpload(localMs, syncedMs);
+  /** 仅当内容与磁盘不一致时写入，避免无用户修改时反复 touch 导致上传后误判「待上传」 */
+  function writeUtf8IfChanged(fp, body) {
+    const s = String(body ?? '');
+    try {
+      if (fs.existsSync(fp) && fs.statSync(fp).isFile()) {
+        const prev = fs.readFileSync(fp, 'utf8');
+        if (prev === s) return false;
+      }
+    } catch (_) {}
+    fs.writeFileSync(fp, s, 'utf8');
+    return true;
   }
 
   function readBookDraftMeta(bookRoot) {
@@ -2212,6 +2184,124 @@ app.whenReady().then(() => {
     const raw = fs.readFileSync(fp, 'utf8');
     return JSON.parse(raw);
   }
+
+  function readBookUploadSyncRaw(bookRoot) {
+    const syncPath = path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE);
+    let sync = {};
+    try {
+      if (fs.existsSync(syncPath)) sync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
+    } catch (_) {}
+    return sync;
+  }
+
+  /** 本地图片上传缓存（路径 → sha256/fileUrl）；与 pending 同属「同步侧」数据，放在 book-upload-sync.json */
+  function mergeAssetMapIntoBookUploadSync(bookRoot, normalizedAssetMap) {
+    if (!bookRoot || !normalizedAssetMap || typeof normalizedAssetMap !== 'object') return;
+    const syncPath = path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE);
+    const sync = readBookUploadSyncRaw(bookRoot);
+    const prev = sync.assetMap && typeof sync.assetMap === 'object' ? sync.assetMap : {};
+    sync.assetMap = { ...prev, ...normalizedAssetMap };
+    if (!sync.pending || !sync.pending.chapters) {
+      const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
+      let outlineStr = '[]';
+      try {
+        if (fs.existsSync(outlinePath)) outlineStr = fs.readFileSync(outlinePath, 'utf8');
+      } catch (_) {}
+      const chapterIds = parseOutlineForChapterIds(outlineStr);
+      const meta = readBookDraftMeta(bookRoot);
+      const rid = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
+      sync.remoteId = rid;
+      sync.pending = { meta: false, outline: false, chapters: {} };
+      chapterIds.forEach((cid) => {
+        sync.pending.chapters[String(cid)] = false;
+      });
+      if (typeof sync.lastUploadAt !== 'number') sync.lastUploadAt = Date.now();
+    }
+    fs.writeFileSync(syncPath, JSON.stringify(sync, null, 2), 'utf8');
+  }
+
+  function getBookAssetMapForDraft(bookRoot, meta) {
+    const sync = readBookUploadSyncRaw(bookRoot);
+    if (sync.assetMap && typeof sync.assetMap === 'object' && Object.keys(sync.assetMap).length) {
+      return sync.assetMap;
+    }
+    if (meta && typeof meta.assetMap === 'object' && meta.assetMap) return meta.assetMap;
+    return {};
+  }
+
+  /**
+   * 远程下载落盘后写入 book-upload-sync：全部「待上传」标记为否，与远端一致。
+   */
+  function writeBookUploadSyncBaselineFromDisk(bookRoot) {
+    if (!bookRoot || !fs.existsSync(bookRoot) || !fs.statSync(bookRoot).isDirectory()) return;
+    const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
+    let outlineStr = '[]';
+    try {
+      if (fs.existsSync(outlinePath)) outlineStr = fs.readFileSync(outlinePath, 'utf8');
+    } catch (_) {}
+    const chapterIds = parseOutlineForChapterIds(outlineStr);
+    const meta = readBookDraftMeta(bookRoot);
+    const remoteId = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
+    const chapters = {};
+    chapterIds.forEach((cid) => {
+      chapters[String(cid)] = false;
+    });
+    const prev = readBookUploadSyncRaw(bookRoot);
+    const assetMap =
+      prev.assetMap && typeof prev.assetMap === 'object' ? prev.assetMap : {};
+    const out = {
+      remoteId,
+      pending: { meta: false, outline: false, chapters },
+      lastUploadAt: Date.now(),
+    };
+    if (Object.keys(assetMap).length) out.assetMap = assetMap;
+    fs.writeFileSync(path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE), JSON.stringify(out, null, 2), 'utf8');
+  }
+
+  function normalizeBookPendingFromSync(sync, chapterIds) {
+    const hasV2 =
+      sync
+      && sync.pending
+      && typeof sync.pending === 'object'
+      && sync.pending.chapters
+      && typeof sync.pending.chapters === 'object';
+    let p;
+    if (hasV2) {
+      p = {
+        meta: Boolean(sync.pending.meta),
+        outline: Boolean(sync.pending.outline),
+        chapters: { ...sync.pending.chapters },
+      };
+    } else {
+      p = { meta: false, outline: false, chapters: {} };
+      chapterIds.forEach((cid) => {
+        p.chapters[String(cid)] = false;
+      });
+    }
+    chapterIds.forEach((cid) => {
+      const k = String(cid);
+      if (p.chapters[k] === undefined) p.chapters[k] = true;
+    });
+    Object.keys(p.chapters).forEach((k) => {
+      const n = Number(k);
+      if (!chapterIds.includes(n)) delete p.chapters[k];
+    });
+    return p;
+  }
+
+  function writeBookUploadSyncDoc(bookRoot, sync, pending, remoteId) {
+    const out = {
+      remoteId,
+      pending,
+      lastUploadAt: Date.now(),
+    };
+    if (typeof sync.lastUploadAt === 'number') out.lastUploadAt = sync.lastUploadAt;
+    if (sync.assetMap && typeof sync.assetMap === 'object' && Object.keys(sync.assetMap).length) {
+      out.assetMap = sync.assetMap;
+    }
+    fs.writeFileSync(path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE), JSON.stringify(out, null, 2), 'utf8');
+  }
+
   function loadBookDraftChapters(bookRoot, outlineStr) {
     const ids = parseOutlineForChapterIds(outlineStr);
     const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
@@ -2298,7 +2388,7 @@ app.whenReady().then(() => {
           seenIds.add(name);
           const updatedAt = typeof meta.updatedAt === 'number' ? meta.updatedAt : 0;
           const remoteId = typeof meta.remoteId === 'string' ? meta.remoteId : '';
-          const assetMap = (meta && typeof meta.assetMap === 'object' && meta.assetMap) ? meta.assetMap : {};
+          const assetMap = getBookAssetMapForDraft(abs, meta);
           const assetCount = Object.keys(assetMap).length;
           drafts.push({
             id: name,
@@ -2410,13 +2500,11 @@ app.whenReady().then(() => {
           } catch (_) {}
           const mergedMeta = {
             ...prevMeta,
-            assetMap: {
-              ...(prevMeta.assetMap && typeof prevMeta.assetMap === 'object' ? prevMeta.assetMap : {}),
-              ...assetMap,
-            },
             updatedAt: now,
           };
+          delete mergedMeta.assetMap;
           fs.writeFileSync(metaPathOnly, JSON.stringify(mergedMeta, null, 2), 'utf8');
+          mergeAssetMapIntoBookUploadSync(br, assetMap);
           return { ok: true, id };
         }
         if (fs.existsSync(bookRoot) && fs.statSync(bookRoot).isDirectory()) {
@@ -2460,10 +2548,10 @@ app.whenReady().then(() => {
         } catch (_) {
           outlineFileBody = '[]';
         }
-        fs.writeFileSync(path.join(bookRoot, BOOK_OUTLINE_FILE), outlineFileBody, 'utf8');
+        writeUtf8IfChanged(path.join(bookRoot, BOOK_OUTLINE_FILE), outlineFileBody);
         chapterIds.forEach((cid) => {
           const body = chapterMap[cid] != null ? String(chapterMap[cid]) : '';
-          fs.writeFileSync(path.join(chaptersDir, `${cid}.md`), body, 'utf8');
+          writeUtf8IfChanged(path.join(chaptersDir, `${cid}.md`), body);
         });
         try {
           const existing = fs.readdirSync(chaptersDir).filter((n) => n.endsWith('.md'));
@@ -2482,10 +2570,10 @@ app.whenReady().then(() => {
           author: String(p.author != null ? p.author : '').slice(0, 200),
           coAuthors,
           remoteId: persistedRemoteId,
-          assetMap,
           updatedAt: now,
         };
         fs.writeFileSync(path.join(bookRoot, BOOK_META_FILE), JSON.stringify(meta, null, 2), 'utf8');
+        mergeAssetMapIntoBookUploadSync(bookRoot, assetMap);
         if (fs.existsSync(legacyJsonPath)) {
           try {
             fs.unlinkSync(legacyJsonPath);
@@ -2565,7 +2653,7 @@ app.whenReady().then(() => {
           outline: outlineStr,
           content: contentJoined,
           remoteId: typeof meta.remoteId === 'string' ? meta.remoteId : '',
-          assetMap: (meta && typeof meta.assetMap === 'object' && meta.assetMap) ? meta.assetMap : {},
+          assetMap: getBookAssetMapForDraft(bookRoot, meta),
           updatedAt: typeof meta.updatedAt === 'number' ? meta.updatedAt : 0,
         };
         return { ok: true, draft };
@@ -2669,6 +2757,27 @@ app.whenReady().then(() => {
       try {
         if (fs.existsSync(syncPath)) sync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
       } catch (_) {}
+      const chapterIds = parseOutlineForChapterIds(outlineStr);
+      const wasLegacy = !(
+        sync
+        && sync.pending
+        && typeof sync.pending === 'object'
+        && sync.pending.chapters
+        && typeof sync.pending.chapters === 'object'
+      );
+      const pending = normalizeBookPendingFromSync(sync, chapterIds);
+      if (wasLegacy) {
+        const syncForWrite = { ...sync };
+        if (
+          (!syncForWrite.assetMap || typeof syncForWrite.assetMap !== 'object')
+          && meta
+          && meta.assetMap
+          && typeof meta.assetMap === 'object'
+        ) {
+          syncForWrite.assetMap = meta.assetMap;
+        }
+        writeBookUploadSyncDoc(bookRoot, syncForWrite, pending, remoteId);
+      }
       function statMs(fp) {
         try {
           return fs.statSync(fp).mtimeMs;
@@ -2680,51 +2789,35 @@ app.whenReady().then(() => {
       const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
       const outlineMs = statMs(outlinePath);
       const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
-      const sm = sync.syncedMetaMtimeMs;
-      const so = sync.syncedOutlineMtimeMs;
-      const sc = sync.syncedChapters && typeof sync.syncedChapters === 'object' ? sync.syncedChapters : {};
-      const smSha = typeof sync.syncedMetaSha256 === 'string' ? sync.syncedMetaSha256 : '';
-      const soSha = typeof sync.syncedOutlineSha256 === 'string' ? sync.syncedOutlineSha256 : '';
-      const scSha =
-        sync.syncedChapterSha256 && typeof sync.syncedChapterSha256 === 'object'
-          ? sync.syncedChapterSha256
-          : {};
-      const metaHex = bookMetaUploadFingerprint(meta);
-      const outlineHex = fileContentSha256(outlinePath);
       const parts = [];
       parts.push({
         partId: 'meta',
         kind: 'meta',
         label: '书籍信息（标题、封面、作者、标签等）',
         mtimeMs: metaMs,
-        syncedMtimeMs: typeof sm === 'number' ? sm : 0,
-        dirty: partDirtyByContentOrMtime(metaHex, smSha, metaMs, sm),
+        syncedMtimeMs: 0,
+        dirty: Boolean(pending.meta),
       });
       parts.push({
         partId: 'outline',
         kind: 'outline',
         label: '大纲',
         mtimeMs: outlineMs,
-        syncedMtimeMs: typeof so === 'number' ? so : 0,
-        dirty: partDirtyByContentOrMtime(outlineHex, soSha, outlineMs, so),
+        syncedMtimeMs: 0,
+        dirty: Boolean(pending.outline),
       });
       chapterTitles.forEach(({ id, title }) => {
         const cfp = path.join(chaptersDir, `${id}.md`);
         const cms = statMs(cfp);
-        const synced = sc[id] != null ? sc[id] : sc[String(id)];
-        const syncedNum = typeof synced === 'number' ? synced : 0;
-        const prevCh =
-          scSha[id] != null ? scSha[id] : scSha[String(id)];
-        const syncedChHex = typeof prevCh === 'string' ? prevCh : '';
-        const chHex = fileContentSha256(cfp);
+        const chDirty = pending.chapters[String(id)] !== false;
         parts.push({
           partId: `chapter:${id}`,
           kind: 'chapter',
           chapterId: id,
           label: title ? `章节：${title}` : `章节 #${id}`,
           mtimeMs: cms,
-          syncedMtimeMs: syncedNum,
-          dirty: partDirtyByContentOrMtime(chHex, syncedChHex, cms, syncedNum),
+          syncedMtimeMs: 0,
+          dirty: chDirty,
         });
       });
       return {
@@ -2749,87 +2842,85 @@ app.whenReady().then(() => {
       if (!fs.existsSync(bookRoot) || !fs.statSync(bookRoot).isDirectory()) {
         return { ok: false, message: '书籍目录不存在' };
       }
-      const metaPath = path.join(bookRoot, BOOK_META_FILE);
       const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
-      const chaptersDir = path.join(bookRoot, BOOK_CHAPTERS_DIR);
       let outlineStr = '[]';
       try {
         if (fs.existsSync(outlinePath)) outlineStr = fs.readFileSync(outlinePath, 'utf8');
       } catch (_) {}
       const chapterIds = parseOutlineForChapterIds(outlineStr);
-      function statMs(fp) {
-        try {
-          return fs.statSync(fp).mtimeMs;
-        } catch (_) {
-          return 0;
-        }
-      }
       const syncPath = path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE);
       let prevSync = {};
       try {
         if (fs.existsSync(syncPath)) prevSync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
       } catch (_) {}
-      const prevSc =
-        prevSync.syncedChapters && typeof prevSync.syncedChapters === 'object'
-          ? prevSync.syncedChapters
-          : {};
-      const prevChSha =
-        prevSync.syncedChapterSha256 && typeof prevSync.syncedChapterSha256 === 'object'
-          ? prevSync.syncedChapterSha256
-          : {};
       const partial = p.partialSync && typeof p.partialSync === 'object' ? p.partialSync : null;
       const meta = readBookDraftMeta(bookRoot);
       const remoteId = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
-      const smPrev = typeof prevSync.syncedMetaMtimeMs === 'number' ? prevSync.syncedMetaMtimeMs : 0;
-      const soPrev = typeof prevSync.syncedOutlineMtimeMs === 'number' ? prevSync.syncedOutlineMtimeMs : 0;
-      const syncedChapters = {};
-      const syncedChapterSha256 = {};
-      const chTouchedList = partial && Array.isArray(partial.chapterIds) ? partial.chapterIds.map(Number) : null;
-      chapterIds.forEach((cid) => {
-        const cfp = path.join(chaptersDir, `${cid}.md`);
-        const cur = statMs(cfp);
-        const prevOne = prevSc[cid] != null ? prevSc[cid] : prevSc[String(cid)];
-        const prevNum = typeof prevOne === 'number' ? prevOne : 0;
-        const chTouched =
-          chTouchedList != null && chTouchedList.some((n) => Number(n) === cid);
-        if (partial) {
-          syncedChapters[cid] = chTouched ? cur : prevNum;
-        } else {
-          syncedChapters[cid] = cur;
-        }
-        const key = String(cid);
-        const curHex = fileContentSha256(cfp);
-        const prevHexRaw = prevChSha[key] != null ? prevChSha[key] : prevChSha[cid];
-        const prevHex = typeof prevHexRaw === 'string' ? prevHexRaw : '';
-        let nextHex;
-        if (!partial) {
-          nextHex = curHex;
-        } else if (chTouched) {
-          nextHex = curHex;
-        } else if (/^[a-f0-9]{64}$/i.test(prevHex)) {
-          nextHex = prevHex;
-        } else {
-          nextHex = curHex;
-        }
-        if (nextHex) syncedChapterSha256[key] = nextHex;
-      });
-      const metaHexNow = bookMetaUploadFingerprint(meta);
-      const outlineHexNow = fileContentSha256(outlinePath);
-      let syncedMetaSha256 = typeof prevSync.syncedMetaSha256 === 'string' ? prevSync.syncedMetaSha256 : '';
-      if (!partial || partial.uploadMeta) syncedMetaSha256 = metaHexNow;
-      let syncedOutlineSha256 = typeof prevSync.syncedOutlineSha256 === 'string' ? prevSync.syncedOutlineSha256 : '';
-      if (!partial || partial.uploadOutline) syncedOutlineSha256 = outlineHexNow;
+      const pending = normalizeBookPendingFromSync(prevSync, chapterIds);
+      if (!partial) {
+        pending.meta = false;
+        pending.outline = false;
+        chapterIds.forEach((cid) => {
+          pending.chapters[String(cid)] = false;
+        });
+      } else {
+        if (partial.uploadMeta) pending.meta = false;
+        if (partial.uploadOutline) pending.outline = false;
+        const ids = Array.isArray(partial.chapterIds) ? partial.chapterIds : [];
+        ids.forEach((raw) => {
+          const n = Number(raw);
+          if (Number.isFinite(n)) pending.chapters[String(n)] = false;
+        });
+      }
       const out = {
         remoteId,
-        syncedMetaMtimeMs: partial && !partial.uploadMeta ? smPrev : statMs(metaPath),
-        syncedOutlineMtimeMs: partial && !partial.uploadOutline ? soPrev : statMs(outlinePath),
-        syncedChapters,
-        syncedMetaSha256,
-        syncedOutlineSha256,
-        syncedChapterSha256,
+        pending,
         lastUploadAt: Date.now(),
       };
+      if (prevSync.assetMap && typeof prevSync.assetMap === 'object') {
+        out.assetMap = prevSync.assetMap;
+      }
       fs.writeFileSync(syncPath, JSON.stringify(out, null, 2), 'utf8');
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: String(e && e.message ? e.message : e) };
+    }
+  });
+
+  ipcMain.handle('compose:bookUploadMarkPending', async (_event, payload) => {
+    try {
+      const p = payload && typeof payload === 'object' ? payload : {};
+      const draftId = typeof p.draftId === 'string' ? p.draftId.trim() : '';
+      if (!isSafeDraftId(draftId)) return { ok: false, message: '无效的草稿 id' };
+      const dir = ensureComposeDraftsDir();
+      const bookRoot = path.join(dir, draftId);
+      if (!fs.existsSync(bookRoot) || !fs.statSync(bookRoot).isDirectory()) {
+        return { ok: false, message: '书籍目录不存在' };
+      }
+      const outlinePath = path.join(bookRoot, BOOK_OUTLINE_FILE);
+      let outlineStr = '[]';
+      try {
+        if (fs.existsSync(outlinePath)) outlineStr = fs.readFileSync(outlinePath, 'utf8');
+      } catch (_) {}
+      const chapterIds = parseOutlineForChapterIds(outlineStr);
+      const syncPath = path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE);
+      let prevSync = {};
+      try {
+        if (fs.existsSync(syncPath)) prevSync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
+      } catch (_) {}
+      const meta = readBookDraftMeta(bookRoot);
+      const remoteId = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
+      const pending = normalizeBookPendingFromSync(prevSync, chapterIds);
+      if (p.meta === true) pending.meta = true;
+      if (p.outline === true) pending.outline = true;
+      const arr = p.chapterIds;
+      if (Array.isArray(arr)) {
+        arr.forEach((raw) => {
+          const n = Number(raw);
+          if (Number.isFinite(n)) pending.chapters[String(n)] = true;
+        });
+      }
+      writeBookUploadSyncDoc(bookRoot, prevSync, pending, remoteId);
       return { ok: true };
     } catch (e) {
       return { ok: false, message: String(e && e.message ? e.message : e) };
@@ -3232,6 +3323,15 @@ ipcMain.handle('remoteBooks:downloadBook', async (event, payload) => {
 
     send({ phase: 'save', status: 'loading', label: '正在写入本地草稿…' });
     const saveRes = await composeDraftsSaveImpl(savePayload);
+    if (saveRes && saveRes.ok && saveRes.id) {
+      try {
+        const dir = ensureComposeDraftsDir();
+        const bookRoot = path.join(dir, saveRes.id);
+        writeBookUploadSyncBaselineFromDisk(bookRoot);
+      } catch (e) {
+        console.warn('[remoteBooks:downloadBook] writeBookUploadSyncBaselineFromDisk', e);
+      }
+    }
     send({
       phase: 'save',
       status: saveRes && saveRes.ok ? 'done' : 'error',

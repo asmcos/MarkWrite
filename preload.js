@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('markwrite', {
     composeCreateContent: (payload) => ipcRenderer.invoke('compose:createContent', payload),
     composeBookUploadDiff: (payload) => ipcRenderer.invoke('compose:bookUploadDiff', payload),
     composeBookUploadMarkSynced: (payload) => ipcRenderer.invoke('compose:bookUploadMarkSynced', payload),
+    composeBookUploadMarkPending: (payload) => ipcRenderer.invoke('compose:bookUploadMarkPending', payload),
     /** 按邮箱或公钥查询 EventStore 用户（联合作者，与 eventstoreUI 一致） */
     eventstoreLookupUser: (payload) => ipcRenderer.invoke('eventstore:lookupUser', payload),
   },
