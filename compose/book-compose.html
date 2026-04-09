@@ -39,11 +39,15 @@
     </div>
     <div id="book-compose-upload-block" class="book-compose-upload-block" style="display: none" aria-hidden="true">
       <p class="book-upload-intro">
-        对比本地文件修改时间与上次成功上传时记录的时间；<strong>待上传</strong>表示该部分自上次上传后有变更。可<strong>勾选分项</strong>后点「上传选中项」，或点「全部上传」；也可在各行点<strong>上传</strong>只发该项。服务器仍为整书
-        <code>create_book</code> / <code>update_book</code>，每次上传都会提交当前合并后的全书内容。
+        <strong>待上传</strong>按<strong>内容</strong>与上次成功上传时保存的摘要比对（书籍信息字段、大纲文件、各章
+        <code>.md</code> 的 SHA-256），不单看修改时间：只改过 B 章并上传后，A 章仍显示已同步。无摘要的旧数据会暂时仍用时间比对，成功上传一次后即写入摘要。可<strong>勾选分项</strong>后「上传选中项」或「全部上传」，或各行「上传」。默认只同步有变更项；勾选「全部重传」时对未改章节也重新提交。
       </p>
       <div id="book-upload-legacy-hint" class="book-upload-legacy-hint" style="display: none" role="status"></div>
       <div class="book-upload-toolbar">
+        <label class="book-upload-force-full-label" title="未勾选时仅上传待上传分项，减少服务器冗余">
+          <input type="checkbox" id="book-upload-force-full" />
+          全部重传（含未改章节）
+        </label>
         <button type="button" class="content-compose-mini-btn" id="book-upload-refresh" title="重新读取本地与同步状态">
           <i class="bi bi-arrow-clockwise"></i> 刷新状态
         </button>

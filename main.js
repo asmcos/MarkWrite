@@ -1026,12 +1026,40 @@ ipcMain.handle('identity:saveProfile', async (_event, profile) => {
   }
 });
 
+function getWorkspaceRootForComposeUploads() {
+  try {
+    if (fs.existsSync(WORKSPACE_ROOT_FILE)) {
+      const w = (fs.readFileSync(WORKSPACE_ROOT_FILE, 'utf8') || '').trim();
+      if (w && fs.existsSync(w) && fs.statSync(w).isDirectory()) return w;
+    }
+  } catch (_) {}
+  return workspaceRoot || DEFAULT_WORKSPACE;
+}
+
+/** 将 `uploads/...` 相对路径解析为可读本地文件（应用目录或工作区 uploads） */
+function resolveLocalUploadRelToFsPath(rel) {
+  const parts = String(rel || '').split(/[/\\]+/).filter(Boolean);
+  if (parts.length < 2) return '';
+  if (parts[0].toLowerCase() !== 'uploads') return '';
+  const candidates = [
+    path.join(ROOT, ...parts),
+    path.join(getWorkspaceRootForComposeUploads(), ...parts),
+  ];
+  for (const fp of candidates) {
+    try {
+      if (fp && fs.existsSync(fp) && fs.statSync(fp).isFile()) return fp;
+    } catch (_) {}
+  }
+  return '';
+}
+
 /**
- * 发布前：将封面/正文里引用的本地 uploads/* 图片上传到服务器，并返回替换后的 cover/content。
+ * 发布前：将封面/正文（及书籍各章）里引用的本地 uploads/* 图片上传到服务器，并返回替换后的 cover/content/chapterContents。
  * - 仅处理形如 uploads/xxx 或 /uploads/xxx 的资源
  * - 返回的 URL 以当前 Sync 的 uploadpath 为前缀
+ * - `chapterContents`：与 `compose:createContent` 同构，各章 Markdown 中的图片路径同样会被替换
  */
-ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
+async function runComposeUploadAssetsAndFixPaths(payload) {
   try {
     const p = payload && typeof payload === 'object' ? payload : {};
     const requestId = typeof p.requestId === 'string' ? p.requestId : '';
@@ -1081,6 +1109,8 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
     if (!privkeyBytes) return { ok: false, message: 'ESEC 密钥解析失败' };
     const cover = typeof p.cover === 'string' ? p.cover : '';
     const content = typeof p.content === 'string' ? p.content : '';
+    const chapterContentsRaw =
+      p.chapterContents && typeof p.chapterContents === 'object' ? p.chapterContents : null;
     const prevAssetMapRaw = p && typeof p.assetMap === 'object' && p.assetMap ? p.assetMap : {};
     const prevAssetMap = {};
     Object.keys(prevAssetMapRaw).forEach((k) => {
@@ -1105,26 +1135,39 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
 
     // cover
     addUploadRef(cover);
-    // markdown image: ![](...)
-    const mdImgRe = /!\[[^\]]*]\(([^)]+)\)/g;
-    let m;
-    while ((m = mdImgRe.exec(content)) !== null) {
-      const rawUrl = (m[1] || '').trim().replace(/^<|>$/g, '');
-      const url = rawUrl.split(/\s+/)[0]; // strip optional title
-      addUploadRef(url.replace(/^["']|["']$/g, ''));
-    }
-    // html image: <img src="...">
-    const htmlImgRe = /<img[^>]+src=["']([^"']+)["']/gi;
-    while ((m = htmlImgRe.exec(content)) !== null) {
-      addUploadRef(m[1]);
+    const addUploadRefsFromMarkdown = (text) => {
+      const t = String(text || '');
+      const mdImgRe = /!\[[^\]]*]\(([^)]+)\)/g;
+      let mm;
+      while ((mm = mdImgRe.exec(t)) !== null) {
+        const rawUrl = (mm[1] || '').trim().replace(/^<|>$/g, '');
+        const url = rawUrl.split(/\s+/)[0];
+        addUploadRef(url.replace(/^["']|["']$/g, ''));
+      }
+      const htmlImgRe = /<img[^>]+src=["']([^"']+)["']/gi;
+      while ((mm = htmlImgRe.exec(t)) !== null) {
+        addUploadRef(mm[1]);
+      }
+    };
+    addUploadRefsFromMarkdown(content);
+    if (chapterContentsRaw) {
+      Object.keys(chapterContentsRaw).forEach((k) => {
+        addUploadRefsFromMarkdown(chapterContentsRaw[k]);
+      });
     }
 
     const uploadsDir = path.join(ROOT, 'uploads');
     const uploadedMap = {};
     const nextAssetMap = { ...prevAssetMap };
-    const targets = Array.from(toUpload).filter((rel) => fs.existsSync(path.join(uploadsDir, path.basename(rel))));
+    const targets = Array.from(toUpload).filter((rel) => Boolean(resolveLocalUploadRelToFsPath(rel)));
     const totalFiles = targets.length;
     let completedFiles = 0;
+    if (toUpload.size > 0 && totalFiles === 0) {
+      logUpload('scan-missing-files', {
+        refs: Array.from(toUpload),
+        hint: 'Markdown 引用了 uploads/ 但本地未找到对应文件（检查应用目录与工作区 uploads）',
+      });
+    }
     logUpload('scan-finished', { totalRefs: toUpload.size, existingLocalFiles: totalFiles, targets });
 
     emitProgress({
@@ -1137,12 +1180,21 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
 
     if (!totalFiles) {
       logUpload('no-local-files-to-upload, return directly');
-      return {
+      const out = {
         ok: true,
         uploaded: uploadedMap,
         cover,
         content,
       };
+      if (chapterContentsRaw) {
+        const cc = {};
+        Object.keys(chapterContentsRaw).forEach((k) => {
+          cc[k] =
+            chapterContentsRaw[k] != null ? String(chapterContentsRaw[k]) : '';
+        });
+        out.chapterContents = cc;
+      }
+      return out;
     }
 
     syncEventstoreVendorConfig();
@@ -1181,7 +1233,7 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       const ext = path.extname(baseName) || '.png';
       const fileStem = safeName(path.basename(baseName, ext)) || 'image';
       const remoteName = `${fileStem}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-      const localPath = path.join(uploadsDir, baseName);
+      const localPath = resolveLocalUploadRelToFsPath(rel);
       const buf = fs.readFileSync(localPath);
       const sha256 = createHash('sha256').update(buf).digest('hex');
       logUpload('file-begin', {
@@ -1368,13 +1420,22 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
       assetMapCount: Object.keys(nextAssetMap).length,
     });
 
-    return {
+    const out = {
       ok: true,
       uploaded: uploadedMap,
       assetMap: nextAssetMap,
       cover: dedupeUploadsInText(rewrite(cover)),
       content: dedupeUploadsInText(rewrite(content)),
     };
+    if (chapterContentsRaw) {
+      const cc = {};
+      Object.keys(chapterContentsRaw).forEach((k) => {
+        const raw = chapterContentsRaw[k];
+        cc[k] = dedupeUploadsInText(rewrite(raw != null ? String(raw) : ''));
+      });
+      out.chapterContents = cc;
+    }
+    return out;
   } catch (e) {
     console.error('[compose-upload][fatal]', e);
     try {
@@ -1391,7 +1452,11 @@ ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) => {
     } catch (_) {}
     return { ok: false, message: e && e.message ? e.message : String(e) };
   }
-});
+}
+
+ipcMain.handle('compose:uploadAssetsAndFixPaths', async (_event, payload) =>
+  runComposeUploadAssetsAndFixPaths(payload),
+);
 
 ipcMain.handle('compose:createContent', async (_event, payload) => {
   try {
@@ -1567,7 +1632,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       let provisionalDoneTimer = null;
       const armTimeout = () => {
         if (timer) clearTimeout(timer);
-        timer = setTimeout(() => done(false, '发布超时（30s）', remoteId || ''), 30000);
+        timer = setTimeout(() => done(false, '发布超时（120s）', remoteId || ''), 120000);
       };
       const done = (ok, message, id) => {
         if (settled) return;
@@ -1576,6 +1641,94 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
         if (provisionalDoneTimer) clearTimeout(provisionalDoneTimer);
         logPublish('finish', { mode: 'book', ok, message, id: id || remoteId || '' });
         resolve({ ok, message, id });
+      };
+      const chapterContentsRaw =
+        p.chapterContents && typeof p.chapterContents === 'object' ? p.chapterContents : {};
+      const isNewBook = !remoteId;
+      let bookSyncPlan = {
+        uploadMeta: true,
+        uploadOutline: true,
+        chapterIds: null,
+        forceFull: false,
+      };
+      if (!isNewBook && p.bookSyncPlan && typeof p.bookSyncPlan === 'object') {
+        const sp = p.bookSyncPlan;
+        if (sp.forceFull === true) {
+          bookSyncPlan = { uploadMeta: true, uploadOutline: true, chapterIds: null, forceFull: true };
+        } else {
+          bookSyncPlan.uploadMeta = sp.uploadMeta === true;
+          bookSyncPlan.uploadOutline = sp.uploadOutline === true;
+          bookSyncPlan.forceFull = false;
+          if (Array.isArray(sp.chapterIds)) {
+            bookSyncPlan.chapterIds = sp.chapterIds
+              .map((n) => Number(n))
+              .filter((n) => Number.isFinite(n));
+          } else {
+            bookSyncPlan.chapterIds = null;
+          }
+        }
+      }
+      const needsBookRpc = isNewBook || bookSyncPlan.uploadMeta;
+      const nothingToSync =
+        !isNewBook
+        && !bookSyncPlan.uploadMeta
+        && !bookSyncPlan.uploadOutline
+        && Array.isArray(bookSyncPlan.chapterIds)
+        && bookSyncPlan.chapterIds.length === 0;
+      logPublish('book-plan', {
+        isNewBook,
+        needsBookRpc,
+        nothingToSync,
+        uploadOutline: isNewBook ? true : bookSyncPlan.uploadOutline,
+        chapterIds: isNewBook ? null : bookSyncPlan.chapterIds,
+      });
+      if (nothingToSync && remoteId) {
+        armTimeout();
+        done(true, '本地已与上次上传一致，无需同步', remoteId);
+        return;
+      }
+      const finalizeBookPublish = async (finalBookId, msgText) => {
+        const bid = String(finalBookId || '').trim();
+        if (!bid) {
+          done(false, '缺少书籍 ID，无法同步大纲与章节', '');
+          return;
+        }
+        logPublish('book-chapters-start', { bookId: bid });
+        let bodies = { ...chapterContentsRaw };
+        try {
+          const ur = await runComposeUploadAssetsAndFixPaths({
+            requestId: `${publishTraceId}-book-chapters`,
+            cover: '',
+            content: '',
+            chapterContents: bodies,
+            assetMap: p.assetMap && typeof p.assetMap === 'object' ? p.assetMap : {},
+          });
+          if (ur && ur.ok && ur.chapterContents && typeof ur.chapterContents === 'object') {
+            bodies = ur.chapterContents;
+          } else if (ur && !ur.ok) {
+            logPublish('book-chapter-asset-rewrite-failed', { message: ur && ur.message });
+          }
+        } catch (e) {
+          logPublish('book-chapter-asset-rewrite-error', { err: e && e.message ? e.message : String(e) });
+        }
+        const uploadOutline = isNewBook ? true : bookSyncPlan.uploadOutline;
+        const chapterIdsFilter = isNewBook ? null : bookSyncPlan.chapterIds;
+        const syncRes = await bookEventstoreMap.syncBookOutlineAndChaptersToServer(mod, {
+          bookId: bid,
+          outlineStr: normalized.outline,
+          chapterContents: bodies,
+          uploadOutline,
+          chapterIdsFilter,
+          pubkeyHex,
+          privkeyBytes,
+          log: (...args) => logPublish(...args),
+        });
+        if (!syncRes || !syncRes.ok) {
+          done(false, (syncRes && syncRes.message) || '大纲或章节上传失败', bid);
+          return;
+        }
+        logPublish('book-chapters-done', { bookId: bid });
+        done(true, msgText || '发布成功', bid);
       };
       armTimeout();
       try {
@@ -1592,22 +1745,27 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
                 return;
               }
               if (c === 201) {
-                // create_book 的 201 仅是生成 id；继续等待 200
                 if (!provisionalDoneTimer && m.id) {
-                  provisionalDoneTimer = setTimeout(
-                    () => done(true, '已生成ID（未收到200确认，按成功处理）', m.id),
-                    3500,
-                  );
+                  const provisionalId = m.id;
+                  provisionalDoneTimer = setTimeout(() => {
+                    void finalizeBookPublish(
+                      provisionalId,
+                      '已生成ID（未收到200确认，按成功处理）；大纲与章节已尝试上传',
+                    );
+                  }, 3500);
                 }
                 return;
               }
               if (c >= 200 && c < 300) {
-                done(true, m.message || '发布成功', m.id || remoteId || '');
+                void finalizeBookPublish(m.id || remoteId || '', m.message || '发布成功');
               }
             }
           } catch (_) {}
         };
-        if (remoteId && typeof mod.update_book === 'function') {
+        if (!needsBookRpc && remoteId) {
+          logPublish('invoke book-chapters-only', { remoteId });
+          void finalizeBookPublish(remoteId, '章节与大纲已同步（书籍元信息未变更）');
+        } else if (remoteId && typeof mod.update_book === 'function') {
           logPublish('invoke update_book', { remoteId });
           mod.update_book(bookData, remoteId, pubkeyHex, privkeyBytes, cb);
         } else {
@@ -2003,6 +2161,51 @@ app.whenReady().then(() => {
     if (syncedMs == null || Number(syncedMs) <= 0) return true;
     return Math.abs(Number(localMs) - Number(syncedMs)) > 0.5;
   }
+
+  function sha256Utf8(s) {
+    return createHash('sha256').update(String(s ?? ''), 'utf8').digest('hex');
+  }
+
+  /** 与 `update_book` 相关的 meta 字段；排除 updatedAt、assetMap 等纯本地项，避免无关变更误判为待上传 */
+  function bookMetaUploadFingerprint(meta) {
+    if (!meta || typeof meta !== 'object') return '';
+    const o = {
+      title: String(meta.title || ''),
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      cover: String(meta.cover || ''),
+      extra: String(meta.extra || ''),
+      author: String(meta.author || ''),
+      coAuthors: Array.isArray(meta.coAuthors)
+        ? meta.coAuthors.map((c) => ({
+            email: typeof c.email === 'string' ? c.email : '',
+            pubkey: typeof c.pubkey === 'string' ? c.pubkey : '',
+          }))
+        : [],
+      remoteId: String(meta.remoteId || ''),
+    };
+    return sha256Utf8(JSON.stringify(o));
+  }
+
+  function fileContentSha256(fp) {
+    try {
+      if (!fp || !fs.existsSync(fp) || !fs.statSync(fp).isFile()) return '';
+      return createHash('sha256').update(fs.readFileSync(fp)).digest('hex');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /**
+   * 已记录内容指纹时按内容比较；否则回退 mtime（兼容旧 book-upload-sync.json）
+   */
+  function partDirtyByContentOrMtime(currentHex, syncedHex, localMs, syncedMs) {
+    if (typeof syncedHex === 'string' && /^[a-f0-9]{64}$/i.test(syncedHex)) {
+      if (!currentHex) return true;
+      return currentHex !== syncedHex;
+    }
+    return partDirtyUpload(localMs, syncedMs);
+  }
+
   function readBookDraftMeta(bookRoot) {
     const fp = path.join(bookRoot, BOOK_META_FILE);
     if (!fs.existsSync(fp)) return null;
@@ -2177,6 +2380,45 @@ app.whenReady().then(() => {
       const bookRoot = path.join(dir, id);
 
       if (modeSave === 'book') {
+        if (p.bookSaveChapterOnly != null && String(p.bookSaveChapterOnly).trim() !== '') {
+          const only = Number(p.bookSaveChapterOnly);
+          if (!Number.isFinite(only)) return { ok: false, error: '无效的章节 id' };
+          const draftId = typeof p.id === 'string' ? p.id.trim() : '';
+          if (!draftId || !isSafeDraftId(draftId)) {
+            return { ok: false, error: '请先保存整书草稿后再使用「仅保存当前章」' };
+          }
+          id = draftId;
+          const br = path.join(dir, id);
+          if (!fs.existsSync(br) || !fs.statSync(br).isDirectory()) {
+            return { ok: false, error: '书籍草稿目录不存在，请先完整保存一次' };
+          }
+          const chaptersDirOnly = path.join(br, BOOK_CHAPTERS_DIR);
+          fs.mkdirSync(chaptersDirOnly, { recursive: true });
+          let body = '';
+          if (p.chapterContents && typeof p.chapterContents === 'object') {
+            const raw =
+              p.chapterContents[only] != null
+                ? p.chapterContents[only]
+                : p.chapterContents[String(only)];
+            body = raw != null ? String(raw) : '';
+          }
+          fs.writeFileSync(path.join(chaptersDirOnly, `${only}.md`), body, 'utf8');
+          const metaPathOnly = path.join(br, BOOK_META_FILE);
+          let prevMeta = {};
+          try {
+            prevMeta = readBookDraftMeta(br) || {};
+          } catch (_) {}
+          const mergedMeta = {
+            ...prevMeta,
+            assetMap: {
+              ...(prevMeta.assetMap && typeof prevMeta.assetMap === 'object' ? prevMeta.assetMap : {}),
+              ...assetMap,
+            },
+            updatedAt: now,
+          };
+          fs.writeFileSync(metaPathOnly, JSON.stringify(mergedMeta, null, 2), 'utf8');
+          return { ok: true, id };
+        }
         if (fs.existsSync(bookRoot) && fs.statSync(bookRoot).isDirectory()) {
           try {
             const oldMeta = readBookDraftMeta(bookRoot);
@@ -2441,6 +2683,14 @@ app.whenReady().then(() => {
       const sm = sync.syncedMetaMtimeMs;
       const so = sync.syncedOutlineMtimeMs;
       const sc = sync.syncedChapters && typeof sync.syncedChapters === 'object' ? sync.syncedChapters : {};
+      const smSha = typeof sync.syncedMetaSha256 === 'string' ? sync.syncedMetaSha256 : '';
+      const soSha = typeof sync.syncedOutlineSha256 === 'string' ? sync.syncedOutlineSha256 : '';
+      const scSha =
+        sync.syncedChapterSha256 && typeof sync.syncedChapterSha256 === 'object'
+          ? sync.syncedChapterSha256
+          : {};
+      const metaHex = bookMetaUploadFingerprint(meta);
+      const outlineHex = fileContentSha256(outlinePath);
       const parts = [];
       parts.push({
         partId: 'meta',
@@ -2448,7 +2698,7 @@ app.whenReady().then(() => {
         label: '书籍信息（标题、封面、作者、标签等）',
         mtimeMs: metaMs,
         syncedMtimeMs: typeof sm === 'number' ? sm : 0,
-        dirty: partDirtyUpload(metaMs, sm),
+        dirty: partDirtyByContentOrMtime(metaHex, smSha, metaMs, sm),
       });
       parts.push({
         partId: 'outline',
@@ -2456,13 +2706,17 @@ app.whenReady().then(() => {
         label: '大纲',
         mtimeMs: outlineMs,
         syncedMtimeMs: typeof so === 'number' ? so : 0,
-        dirty: partDirtyUpload(outlineMs, so),
+        dirty: partDirtyByContentOrMtime(outlineHex, soSha, outlineMs, so),
       });
       chapterTitles.forEach(({ id, title }) => {
         const cfp = path.join(chaptersDir, `${id}.md`);
         const cms = statMs(cfp);
         const synced = sc[id] != null ? sc[id] : sc[String(id)];
         const syncedNum = typeof synced === 'number' ? synced : 0;
+        const prevCh =
+          scSha[id] != null ? scSha[id] : scSha[String(id)];
+        const syncedChHex = typeof prevCh === 'string' ? prevCh : '';
+        const chHex = fileContentSha256(cfp);
         parts.push({
           partId: `chapter:${id}`,
           kind: 'chapter',
@@ -2470,7 +2724,7 @@ app.whenReady().then(() => {
           label: title ? `章节：${title}` : `章节 #${id}`,
           mtimeMs: cms,
           syncedMtimeMs: syncedNum,
-          dirty: partDirtyUpload(cms, syncedNum),
+          dirty: partDirtyByContentOrMtime(chHex, syncedChHex, cms, syncedNum),
         });
       });
       return {
@@ -2510,24 +2764,72 @@ app.whenReady().then(() => {
           return 0;
         }
       }
-      const syncedChapters = {};
-      chapterIds.forEach((cid) => {
-        syncedChapters[cid] = statMs(path.join(chaptersDir, `${cid}.md`));
-      });
+      const syncPath = path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE);
+      let prevSync = {};
+      try {
+        if (fs.existsSync(syncPath)) prevSync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
+      } catch (_) {}
+      const prevSc =
+        prevSync.syncedChapters && typeof prevSync.syncedChapters === 'object'
+          ? prevSync.syncedChapters
+          : {};
+      const prevChSha =
+        prevSync.syncedChapterSha256 && typeof prevSync.syncedChapterSha256 === 'object'
+          ? prevSync.syncedChapterSha256
+          : {};
+      const partial = p.partialSync && typeof p.partialSync === 'object' ? p.partialSync : null;
       const meta = readBookDraftMeta(bookRoot);
       const remoteId = meta && typeof meta.remoteId === 'string' ? meta.remoteId.trim() : '';
+      const smPrev = typeof prevSync.syncedMetaMtimeMs === 'number' ? prevSync.syncedMetaMtimeMs : 0;
+      const soPrev = typeof prevSync.syncedOutlineMtimeMs === 'number' ? prevSync.syncedOutlineMtimeMs : 0;
+      const syncedChapters = {};
+      const syncedChapterSha256 = {};
+      const chTouchedList = partial && Array.isArray(partial.chapterIds) ? partial.chapterIds.map(Number) : null;
+      chapterIds.forEach((cid) => {
+        const cfp = path.join(chaptersDir, `${cid}.md`);
+        const cur = statMs(cfp);
+        const prevOne = prevSc[cid] != null ? prevSc[cid] : prevSc[String(cid)];
+        const prevNum = typeof prevOne === 'number' ? prevOne : 0;
+        const chTouched =
+          chTouchedList != null && chTouchedList.some((n) => Number(n) === cid);
+        if (partial) {
+          syncedChapters[cid] = chTouched ? cur : prevNum;
+        } else {
+          syncedChapters[cid] = cur;
+        }
+        const key = String(cid);
+        const curHex = fileContentSha256(cfp);
+        const prevHexRaw = prevChSha[key] != null ? prevChSha[key] : prevChSha[cid];
+        const prevHex = typeof prevHexRaw === 'string' ? prevHexRaw : '';
+        let nextHex;
+        if (!partial) {
+          nextHex = curHex;
+        } else if (chTouched) {
+          nextHex = curHex;
+        } else if (/^[a-f0-9]{64}$/i.test(prevHex)) {
+          nextHex = prevHex;
+        } else {
+          nextHex = curHex;
+        }
+        if (nextHex) syncedChapterSha256[key] = nextHex;
+      });
+      const metaHexNow = bookMetaUploadFingerprint(meta);
+      const outlineHexNow = fileContentSha256(outlinePath);
+      let syncedMetaSha256 = typeof prevSync.syncedMetaSha256 === 'string' ? prevSync.syncedMetaSha256 : '';
+      if (!partial || partial.uploadMeta) syncedMetaSha256 = metaHexNow;
+      let syncedOutlineSha256 = typeof prevSync.syncedOutlineSha256 === 'string' ? prevSync.syncedOutlineSha256 : '';
+      if (!partial || partial.uploadOutline) syncedOutlineSha256 = outlineHexNow;
       const out = {
         remoteId,
-        syncedMetaMtimeMs: statMs(metaPath),
-        syncedOutlineMtimeMs: statMs(outlinePath),
+        syncedMetaMtimeMs: partial && !partial.uploadMeta ? smPrev : statMs(metaPath),
+        syncedOutlineMtimeMs: partial && !partial.uploadOutline ? soPrev : statMs(outlinePath),
         syncedChapters,
+        syncedMetaSha256,
+        syncedOutlineSha256,
+        syncedChapterSha256,
         lastUploadAt: Date.now(),
       };
-      fs.writeFileSync(
-        path.join(bookRoot, BOOK_UPLOAD_SYNC_FILE),
-        JSON.stringify(out, null, 2),
-        'utf8',
-      );
+      fs.writeFileSync(syncPath, JSON.stringify(out, null, 2), 'utf8');
       return { ok: true };
     } catch (e) {
       return { ok: false, message: String(e && e.message ? e.message : e) };
