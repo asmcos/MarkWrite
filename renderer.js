@@ -365,13 +365,23 @@ window.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  /** 书籍大纲由树同步到隐藏 textarea；始终用 document 取当前节点，避免模板切换后缓存引用失效。 */
+  function getLiveBookOutlineTextFromDom() {
+    const el = document.getElementById('content-compose-outline');
+    return el && typeof el.value === 'string' ? el.value.trim() : '';
+  }
+
+  function isBookOutlineDirtyComparedToBaseline() {
+    if (composeState.mode !== 'book') return false;
+    return getLiveBookOutlineTextFromDom() !== getOutlineFromSerializedState(composeBaselineSerialized);
+  }
+
   function readComposeDraftFromUi() {
     const titleEl = document.getElementById('content-compose-main-title');
     const coverEl = document.getElementById('content-compose-cover');
     const extraEl = document.getElementById('content-compose-extra');
     const authorEl = document.getElementById('content-compose-author');
-    const outlineEl = document.getElementById('content-compose-outline');
-    const outline = (outlineEl && outlineEl.value.trim()) || '';
+    const outline = getLiveBookOutlineTextFromDom();
     let content = editor ? editor.getValue() : '';
     if (composeState.mode === 'book') {
       const map = { ...composeState.bookChapterContents };
@@ -608,7 +618,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         extra: ui.extra,
         author: ui.author || '',
         coAuthors: Array.isArray(ui.coAuthors) ? ui.coAuthors : [],
-        outline: ui.outline || '',
+        outline: getLiveBookOutlineTextFromDom() || ui.outline || '',
         content: '',
         remoteId: composeState.remoteId || '',
         assetMap: composeState.assetMap || {},
@@ -621,13 +631,6 @@ window.addEventListener('DOMContentLoaded', async () => {
       }
       return { ok: false, error: (resCh && resCh.error) || '保存章节失败' };
     }
-    const outlineWasDirtyBeforeFullSave =
-      composeState.mode === 'book'
-      && (() => {
-        const currentOutline = String(ui.outline || '').trim();
-        const baselineOutline = getOutlineFromSerializedState(composeBaselineSerialized);
-        return currentOutline !== baselineOutline;
-      })();
     const payload = {
       id: composeState.draftFileId || undefined,
       mode: composeState.mode || 'blog',
@@ -669,6 +672,19 @@ window.addEventListener('DOMContentLoaded', async () => {
       const go = await confirmOverwriteIfLocalDraftExists(api, stableId);
       if (!go) return { ok: false, error: '已取消保存' };
       payload.id = stableId;
+    }
+    let outlineWasDirtyBeforeFullSave = false;
+    if (composeState.mode === 'book') {
+      const liveOutline = getLiveBookOutlineTextFromDom();
+      payload.outline = liveOutline;
+      const cc = buildBookChapterContentsPayload();
+      const ids = collectBookChapterIdsFromOutlineStr(liveOutline);
+      ids.forEach((id) => {
+        if (cc[id] === undefined) cc[id] = '';
+      });
+      payload.chapterContents = cc;
+      payload.content = mergeBookChaptersPlain(ids, cc);
+      outlineWasDirtyBeforeFullSave = isBookOutlineDirtyComparedToBaseline();
     }
     const res = await api.composeDraftsSave(payload);
     if (res && res.ok && res.id) {
@@ -772,9 +788,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       btn.classList.remove('is-dirty');
       return;
     }
-    const currentOutline = (contentComposeOutline && typeof contentComposeOutline.value === 'string')
-      ? contentComposeOutline.value.trim()
-      : '';
+    const currentOutline = getLiveBookOutlineTextFromDom();
     const baselineOutline = getOutlineFromSerializedState(composeBaselineSerialized);
     btn.classList.toggle('is-dirty', currentOutline !== baselineOutline);
   }
@@ -939,6 +953,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   const editorFilename = document.getElementById('editor-filename');
   const syncConnStatus = document.getElementById('sync-conn-status');
   const syncConnText = document.getElementById('sync-conn-text');
+  const syncConnReconnectBtn = document.getElementById('sync-conn-reconnect');
   // 旧的文件操作按钮（已在 UI 隐藏，仍可复用其逻辑）
   const btnOpen = document.getElementById('btn-open');
   const btnToggleExplorer = document.getElementById('btn-toggle-explorer');
@@ -1390,13 +1405,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   let syncServers = [];
   let activeSyncServerId = null;
   const syncConnState = {
-    status: 'idle', // idle | connecting | connected | disconnected
+    status: 'idle', // idle | connecting | connected | disconnected | stopped
     serverId: '',
     esserver: '',
     inflight: false,
     pollTimer: null,
     restartTimer: null,
     generation: 0,
+    /** 用户点击状态栏按钮主动停止后，不再轮询，直至再次点击「开始」或配置变更 */
+    userStopped: false,
   };
 
   function getActiveSyncServer() {
@@ -1410,7 +1427,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   function setSyncConnStatus(status, text, title) {
     syncConnState.status = status;
     if (syncConnStatus) {
-      syncConnStatus.classList.remove('is-idle', 'is-connecting', 'is-connected', 'is-disconnected');
+      syncConnStatus.classList.remove('is-idle', 'is-connecting', 'is-connected', 'is-disconnected', 'is-stopped');
       syncConnStatus.classList.add(
         status === 'connected'
           ? 'is-connected'
@@ -1418,11 +1435,14 @@ window.addEventListener('DOMContentLoaded', async () => {
             ? 'is-connecting'
             : status === 'disconnected'
               ? 'is-disconnected'
-              : 'is-idle',
+              : status === 'stopped'
+                ? 'is-stopped'
+                : 'is-idle',
       );
       if (title) syncConnStatus.title = title;
     }
     if (syncConnText) syncConnText.textContent = text || '服务器：未检测';
+    updateSyncConnToggleUi();
   }
 
   function clearSyncConnTimers() {
@@ -1440,11 +1460,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     if (syncConnState.restartTimer) clearTimeout(syncConnState.restartTimer);
     syncConnState.restartTimer = setTimeout(() => {
       syncConnState.restartTimer = null;
+      syncConnState.userStopped = false;
+      updateSyncConnToggleUi();
       startSyncConnMonitor();
     }, delayMs);
   }
 
+  function resumeSyncConnMonitor() {
+    syncConnState.userStopped = false;
+    updateSyncConnToggleUi();
+    startSyncConnMonitor();
+  }
+
   function startSyncConnMonitor() {
+    if (syncConnState.userStopped) return;
     clearSyncConnTimers();
     syncConnState.generation += 1;
     const gen = syncConnState.generation;
@@ -1505,6 +1534,55 @@ window.addEventListener('DOMContentLoaded', async () => {
     };
 
     runCheck();
+  }
+
+  function updateSyncConnToggleUi() {
+    const btn = syncConnReconnectBtn;
+    const icon = document.getElementById('sync-conn-toggle-icon');
+    if (!btn) return;
+    const stopped = syncConnState.userStopped;
+    const st = syncConnState.status;
+    btn.classList.toggle('is-paused', stopped);
+    btn.classList.toggle('is-online', !stopped && st === 'connected');
+    btn.classList.toggle('is-connecting', !stopped && st === 'connecting');
+    if (stopped) {
+      btn.title = '连接服务器（WebSocket）';
+      btn.setAttribute('aria-label', '连接服务器');
+      if (icon) icon.className = 'bi bi-play-fill sync-conn-toggle-ic';
+      return;
+    }
+    if (st === 'connected') {
+      btn.title = '断开与 EventStore 的连接';
+      btn.setAttribute('aria-label', '断开连接');
+    } else {
+      btn.title = '停止连接与自动重试';
+      btn.setAttribute('aria-label', '停止连接与自动重试');
+    }
+    if (icon) icon.className = 'bi bi-stop-fill sync-conn-toggle-ic';
+  }
+
+  async function toggleSyncConnFromStatusBar() {
+    if (syncConnState.userStopped) {
+      syncConnReconnectBtn?.classList.remove('is-spinning');
+      void syncConnReconnectBtn?.offsetWidth;
+      syncConnReconnectBtn?.classList.add('is-spinning');
+      setTimeout(() => {
+        syncConnReconnectBtn?.classList.remove('is-spinning');
+      }, 700);
+      resumeSyncConnMonitor();
+      return;
+    }
+    syncConnState.userStopped = true;
+    syncConnState.generation += 1;
+    clearSyncConnTimers();
+    syncConnState.inflight = false;
+    const api = window.markwrite && window.markwrite.api;
+    if (api && typeof api.syncDisconnect === 'function') {
+      try {
+        await api.syncDisconnect();
+      } catch (_) {}
+    }
+    setSyncConnStatus('stopped', '服务器：已停止', '点击右侧圆形按钮重新连接');
   }
 
   function hydrateIdentityUiFromRecord(id) {
@@ -1580,7 +1658,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         renderSyncServerList();
         fillSyncFormFromActive();
         loadIdentityForActiveServer();
-        startSyncConnMonitor();
+        resumeSyncConnMonitor();
       });
       settingsSyncServerList.appendChild(li);
     });
@@ -1784,20 +1862,20 @@ window.addEventListener('DOMContentLoaded', async () => {
         renderSyncServerList();
         fillSyncFormFromActive();
         loadIdentityForActiveServer();
-        startSyncConnMonitor();
+        resumeSyncConnMonitor();
       }).catch(() => {
         // 失败时仍使用内存中的默认结构（可能为空）
         renderSyncServerList();
         fillSyncFormFromActive();
         loadIdentityForActiveServer();
-        startSyncConnMonitor();
+        resumeSyncConnMonitor();
       });
     } else {
       renderSyncServerList();
       fillSyncFormFromActive();
       if (window.markwrite?.api?.identityGet) loadIdentityForActiveServer();
       else hydrateIdentityUiFromRecord({});
-      startSyncConnMonitor();
+      resumeSyncConnMonitor();
     }
     // 预填 Workspace 只读展示
     if (settingsWorkspaceCurrent && window.markwrite?.api?.getDefaultWorkspace) {
@@ -2143,7 +2221,7 @@ window.addEventListener('DOMContentLoaded', async () => {
           renderSyncServerList();
           fillSyncFormFromActive();
           loadIdentityForActiveServer();
-          startSyncConnMonitor();
+          resumeSyncConnMonitor();
         }).catch(() => {});
       }
     });
@@ -2586,7 +2664,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       renderSyncServerList();
       fillSyncFormFromActive();
       loadIdentityForActiveServer();
-      startSyncConnMonitor();
+      resumeSyncConnMonitor();
     });
   }
 
@@ -2615,7 +2693,7 @@ window.addEventListener('DOMContentLoaded', async () => {
       renderSyncServerList();
       fillSyncFormFromActive();
       loadIdentityForActiveServer();
-      startSyncConnMonitor();
+      resumeSyncConnMonitor();
     });
   }
 
@@ -2881,12 +2959,9 @@ window.addEventListener('DOMContentLoaded', async () => {
         showAppAlert(diff.message || '请先将草稿保存为目录草稿');
         return { ok: false };
       }
-      if (bookUploadGate === 'all') {
-        if (!(diff.parts || []).some((x) => x.dirty)) {
-          showAppAlert('本地已全部与上次上传记录一致，无需上传');
-          return { ok: false };
-        }
-      } else if (bookUploadGate === 'selected') {
+      // 不按「是否标为待上传」拦截「全部上传」：本地可有 provisional remoteId 而 pending 全 false，
+      // 或用户希望强制再传；具体是否 no-op 由主进程与 bookSyncPlan 决定。
+      if (bookUploadGate === 'selected') {
         const boxes = document.querySelectorAll('#book-upload-parts-list input.book-upload-part-cb');
         const selected = [...boxes].filter((b) => b.checked);
         if (!selected.length) {
@@ -4820,7 +4895,7 @@ window.addEventListener('DOMContentLoaded', async () => {
         }
       } catch (_) {}
     }
-    startSyncConnMonitor();
+    resumeSyncConnMonitor();
     if (!fileRootPath && window.markwrite?.api?.getDefaultWorkspace) {
       try {
         const r = await window.markwrite.api.getDefaultWorkspace();
@@ -5356,6 +5431,11 @@ window.addEventListener('DOMContentLoaded', async () => {
   if (menuFileOpenWorkspace) {
     // 打开工作区：逻辑与「打开」相同，但用户语义是优先选目录
     menuFileOpenWorkspace.addEventListener('click', () => { void doOpenFileOrWorkspace(); });
+  }
+  if (syncConnReconnectBtn) {
+    syncConnReconnectBtn.addEventListener('click', () => {
+      void toggleSyncConnFromStatusBar();
+    });
   }
 
   function appendMessage(role, content) {

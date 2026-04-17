@@ -414,6 +414,14 @@ html[data-theme="light"] #ai-input {
 html[data-theme="light"] #ai-input::placeholder {
   color: var(--mw-text-muted);
 }
+html[data-theme="light"] .ai-input-area:focus-within #ai-input::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+html[data-theme="light"] .ai-input-area:focus-within #ai-input::-webkit-input-placeholder {
+  color: transparent;
+  opacity: 0;
+}
 html[data-theme="light"] #ai-input::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.45);
 }

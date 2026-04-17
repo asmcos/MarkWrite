@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('markwrite', {
     syncGetConfig: () => ipcRenderer.invoke('sync:getConfig'),
     syncSaveConfig: (cfg) => ipcRenderer.invoke('sync:saveConfig', cfg),
     syncGetConnectionStatus: () => ipcRenderer.invoke('sync:getConnectionStatus'),
+    syncDisconnect: () => ipcRenderer.invoke('sync:disconnect'),
     identityGet: (payload) => ipcRenderer.invoke('identity:get', payload),
     identitySave: (cfg) => ipcRenderer.invoke('identity:save', cfg),
     identityGenerate: () => ipcRenderer.invoke('identity:generate'),

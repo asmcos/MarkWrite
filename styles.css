@@ -2792,6 +2792,94 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
 .sync-conn-pill.is-idle .sync-conn-dot {
   background: #64748b;
 }
+.sync-conn-pill.is-stopped .sync-conn-dot {
+  background: #94a3b8;
+}
+.sync-conn-toggle-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(71, 85, 105, 0.85);
+  background: radial-gradient(circle at 30% 28%, rgba(55, 65, 85, 0.88), rgba(15, 23, 42, 0.94));
+  color: #cbd5e1;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease,
+    transform 0.08s ease,
+    background 0.15s ease;
+}
+.sync-conn-toggle-btn:hover {
+  border-color: rgba(148, 163, 184, 0.55);
+  color: #f8fafc;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 0 1px rgba(59, 130, 246, 0.15),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.sync-conn-toggle-btn:active {
+  transform: translateY(1px);
+}
+/* 已连上：停止 = 断开，略偏暖色提示「可中断」 */
+.sync-conn-toggle-btn.is-online {
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fef3c7;
+  background: radial-gradient(circle at 30% 28%, rgba(120, 53, 15, 0.45), rgba(15, 23, 42, 0.94));
+}
+.sync-conn-toggle-btn.is-online:hover {
+  border-color: rgba(251, 191, 36, 0.7);
+}
+/* 正在连：细环脉动 */
+.sync-conn-toggle-btn.is-connecting {
+  border-color: rgba(96, 165, 250, 0.55);
+  color: #dbeafe;
+  animation: sync-conn-pulse-ring 1.4s ease-in-out infinite;
+}
+@keyframes sync-conn-pulse-ring {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 0 0 0 rgba(59, 130, 246, 0.25);
+  }
+  50% {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 0 0 3px rgba(59, 130, 246, 0.12);
+  }
+}
+.sync-conn-toggle-btn.is-paused {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: radial-gradient(circle at 30% 28%, rgba(21, 128, 61, 0.42), rgba(15, 23, 42, 0.94));
+  color: #dcfce7;
+  animation: none;
+}
+.sync-conn-toggle-btn.is-paused:hover {
+  border-color: rgba(34, 197, 94, 0.72);
+}
+.sync-conn-toggle-ic {
+  font-size: 9px;
+  line-height: 1;
+  display: block;
+}
+.sync-conn-toggle-btn.is-spinning .sync-conn-toggle-ic {
+  animation: sync-conn-spin 0.55s linear 1;
+}
+@keyframes sync-conn-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
 .file-list {
   list-style: none;
   padding: 2px 0 2px 2px; /* 整体稍微向左靠一点 */
@@ -3246,6 +3334,19 @@ body[data-explorer-hidden="1"] .collapsed-explorer-handle {
 }
 #ai-input::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
+}
+/* 鼠标点进输入区后隐藏 placeholder，避免与光标/输入叠在一起 */
+.ai-input-area:focus-within #ai-input::placeholder {
+  color: transparent;
+  opacity: 0;
+}
+.ai-input-area:focus-within #ai-input::-webkit-input-placeholder {
+  color: transparent;
+  opacity: 0;
+}
+.ai-input-area:focus-within #ai-input::-moz-placeholder {
+  color: transparent;
+  opacity: 0;
 }
 #ai-send.ai-send-btn {
   flex-shrink: 0;

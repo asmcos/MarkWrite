@@ -605,6 +605,65 @@ function setWorkspaceRoot(dirPath) {
   setupWorkspaceWatcher();
 }
 
+/** 与 composeDrafts 内 isSafeDraftId 一致，供发布流程写回 meta（compose:createContent 在 app.whenReady 外注册） */
+function isSafeComposeDraftIdForPublish(id) {
+  if (typeof id !== 'string') return false;
+  const t = id.trim();
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return true;
+  if (t.length < 4 || t.length > 200) return false;
+  if (t === '.' || t === '..') return false;
+  if (/[\/\\:\*\?"<>\|\x00-\x1f]/.test(t)) return false;
+  if (/^\s|\s$/.test(t) || /[. ]$/.test(t)) return false;
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(t)) return false;
+  return true;
+}
+
+/**
+ * create_book 同步回调 { code:201, id:bookId } 或后续成功路径拿到 id 后，写回本地书籍草稿 meta / book-upload-sync。
+ */
+function persistBookRemoteIdToLocalDraft(draftFileId, remoteBookId) {
+  const did = String(draftFileId || '').trim();
+  const rid = String(remoteBookId || '').trim();
+  if (!did || !rid || !isSafeComposeDraftIdForPublish(did)) return;
+  loadWorkspaceRoot();
+  const root = (workspaceRoot || DEFAULT_WORKSPACE || '').trim();
+  const candidates = [];
+  if (root) candidates.push(path.join(root, '.markwrite', 'compose-drafts', did));
+  try {
+    candidates.push(path.join(app.getPath('userData'), 'compose-drafts', did));
+  } catch (_) {}
+  const metaName = 'meta.json';
+  const syncName = 'book-upload-sync.json';
+  for (const bookRoot of candidates) {
+    const metaPath = path.join(bookRoot, metaName);
+    try {
+      if (!fs.existsSync(metaPath)) continue;
+      let meta = {};
+      try {
+        meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+      } catch (_) {
+        meta = {};
+      }
+      if (!meta || meta.mode !== 'book') continue;
+      meta.remoteId = rid;
+      meta.updatedAt = Date.now();
+      fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+      const syncPath = path.join(bookRoot, syncName);
+      let sync = {};
+      try {
+        if (fs.existsSync(syncPath)) sync = JSON.parse(fs.readFileSync(syncPath, 'utf8'));
+      } catch (_) {}
+      if (!sync || typeof sync !== 'object') sync = {};
+      sync.remoteId = rid;
+      fs.writeFileSync(syncPath, JSON.stringify(sync, null, 2), 'utf8');
+      console.log('[compose-publish] persisted book remoteId to local draft', { draftId: did, remoteId: rid });
+      return;
+    } catch (e) {
+      console.warn('[compose-publish] persist remoteId failed', e && e.message ? e.message : e);
+    }
+  }
+}
+
 ipcMain.handle('app:getDefaultWorkspace', async () => {
   loadWorkspaceRoot();
   return { path: workspaceRoot || DEFAULT_WORKSPACE };
@@ -751,6 +810,20 @@ ipcMain.handle('sync:getConnectionStatus', async () => {
       serverName: '',
       esserver: '',
     };
+  }
+});
+
+/** 主动断开当前 EventStore WebSocket（与状态栏「停止」一致） */
+ipcMain.handle('sync:disconnect', async () => {
+  try {
+    syncEventstoreVendorConfig();
+    const mod = loadEsclient();
+    if (!mod || typeof mod.disconnect_eventstore !== 'function') {
+      return { ok: false, message: 'esclient 缺少 disconnect_eventstore' };
+    }
+    return mod.disconnect_eventstore();
+  } catch (e) {
+    return { ok: false, message: e && e.message ? e.message : String(e) };
   }
 });
 
@@ -1518,6 +1591,8 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
       content: typeof p.content === 'string' ? p.content : '',
     };
     const remoteId = typeof p.remoteId === 'string' ? p.remoteId.trim() : '';
+    const draftFileIdRaw = typeof p.draftFileId === 'string' ? p.draftFileId.trim() : '';
+    const draftFileId = draftFileIdRaw && isSafeComposeDraftIdForPublish(draftFileIdRaw) ? draftFileIdRaw : '';
     logPublish('start', {
       mode,
       titleLen: title.length,
@@ -1693,6 +1768,7 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
           done(false, '缺少书籍 ID，无法同步大纲与章节', '');
           return;
         }
+        persistBookRemoteIdToLocalDraft(draftFileId, bid);
         logPublish('book-chapters-start', { bookId: bid });
         let bodies = { ...chapterContentsRaw };
         try {
@@ -1745,6 +1821,9 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
                 return;
               }
               if (c === 201) {
+                if (m.id) {
+                  persistBookRemoteIdToLocalDraft(draftFileId, m.id);
+                }
                 if (!provisionalDoneTimer && m.id) {
                   const provisionalId = m.id;
                   provisionalDoneTimer = setTimeout(() => {
