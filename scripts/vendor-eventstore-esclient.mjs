@@ -158,17 +158,7 @@ export async function ensure_connected(timeoutMs = 6000){
 }
 
 let text;
-const local = process.env.ESCLIENT_LOCAL;
-if (local) {
-  text = readLocalFile(local);
-  if (!text) {
-    console.error('ESCLIENT_LOCAL 指向的文件不存在:', local);
-    process.exit(1);
-  }
-} else {
-  const sibling = path.join(root, '..', 'eventstoreUI', 'src', 'lib', 'esclient.ts');
-  text = readLocalFile(sibling);
-}
+
 
 if (!text) {
   try {

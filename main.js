@@ -1272,6 +1272,18 @@ async function runComposeUploadAssetsAndFixPaths(payload) {
 
     syncEventstoreVendorConfig();
     const mod = loadEsclient();
+    if (!mod || typeof mod.ensure_connected !== 'function') {
+      return { ok: false, message: 'EventStore 客户端不可用' };
+    }
+    const connAssets = await mod.ensure_connected(15000);
+    if (!connAssets || !connAssets.ok) {
+      return {
+        ok: false,
+        message: connAssets && connAssets.message
+          ? `未连接到服务器（无法上传图片）：${connAssets.message}`
+          : '未连接到服务器，请点状态栏「连接」后再上传',
+      };
+    }
     /** 将服务端返回的 fileUrl/path/url 归一为可访问地址（优先使用服务端返回值） */
     const mkPublicUrl = (serverPathOrUrl) => {
       const base = uploadBase.endsWith('/') ? uploadBase : `${uploadBase}/`;
@@ -1643,6 +1655,18 @@ ipcMain.handle('compose:createContent', async (_event, payload) => {
 
     syncEventstoreVendorConfig();
     const mod = loadEsclient();
+    if (!mod || typeof mod.ensure_connected !== 'function') {
+      return { ok: false, message: 'EventStore 客户端不可用' };
+    }
+    const connPublish = await mod.ensure_connected(15000);
+    if (!connPublish || !connPublish.ok) {
+      return {
+        ok: false,
+        message: connPublish && connPublish.message
+          ? `未连接到服务器：${connPublish.message}`
+          : '未连接到服务器，请点状态栏「连接」后再发布',
+      };
+    }
 
     if (mode === 'blog') {
       return await new Promise((resolve) => {
