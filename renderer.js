@@ -1054,6 +1054,16 @@ window.addEventListener('DOMContentLoaded', async () => {
   const composeTemplateCache = { blog: '', book: '' };
   async function loadComposeTemplate(mode) {
     if (!contentComposeTopHost || !contentComposeBottomHost) return;
+    // After syncComposeModeUi('blog'), save/publish live inside bottom host. Replacing
+    // innerHTML would destroy those nodes; move them back to the header first.
+    const headActionsPreserve = document.getElementById('content-compose-head-actions');
+    if (headActionsPreserve && contentComposeBottomHost.contains(headActionsPreserve)) {
+      const headTrailingPreserve = document.querySelector('.content-compose-head-trailing');
+      const closePreserve = document.getElementById('content-compose-close');
+      if (headTrailingPreserve) {
+        headTrailingPreserve.insertBefore(headActionsPreserve, closePreserve || null);
+      }
+    }
     const key = mode === 'book' ? 'book' : 'blog';
     if (!composeTemplateCache[key]) {
       const res = await fetch(`./compose/${key}-compose.html`);
